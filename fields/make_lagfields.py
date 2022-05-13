@@ -146,8 +146,7 @@ def make_lagfields(configs):
     else:
         lindir = configs["outdir"]
 
-
-
+    outdir = configs['outdir']
     nmesh = configs["nmesh_in"]
     start_time = time.time()
     Lbox = configs["lbox"]
@@ -186,14 +185,14 @@ def make_lagfields(configs):
         print(dmean, " mean deltasq")
 
     # Parallel-write delta^2 to hdf5 file
-    d2.write(lindir + "mpi_icfields_nmesh%s.h5" % nmesh, "deltasq", step=2)
+    d2.write(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "deltasq", step=2)
 
     # Free up memory
     del d2, dmean
     gc.collect()
 
     # Write the linear density field to hdf5
-    u.write(lindir + "mpi_icfields_nmesh%s.h5" % nmesh, "delta", step=2)
+    u.write(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "delta", step=2)
 
     # Take a forward FFT of the linear density
     u_hat = fft.forward(u, normalize=True)
@@ -219,7 +218,7 @@ def make_lagfields(configs):
         print(vmean, " mean tidesq")
     v -= vmean
 
-    v.write(lindir + "mpi_icfields_nmesh%s.h5" % nmesh, "tidesq", step=2)
+    v.write(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "tidesq", step=2)
 
     # clear up space yet again
     del v, tinyfft, vmean
@@ -232,7 +231,7 @@ def make_lagfields(configs):
 
     v[:] = nablasq
 
-    v.write(lindir + "mpi_icfields_nmesh%s.h5" % nmesh, "nablasq", step=2)
+    v.write(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "nablasq", step=2)
     # Moar space
     del u, bigmesh, deltak, u_hat, fft, v
     gc.collect()
@@ -244,18 +243,18 @@ def make_lagfields(configs):
             print("Wrote successfully! Now must convert to .npy files")
             print(time.time() - start_time, " seconds!")
             get_memory()
-            f = h5py.File(lindir + "mpi_icfields_nmesh%s.h5" % nmesh, "r")
+            f = h5py.File(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "r")
             fkeys = list(f.keys())
             for key in fkeys:
                 arr = f[key]["3D"]["2"]
                 print("converting " + key + " to numpy array")
-                np.save(lindir + "%s_np" % key, arr)
+                np.save(outdir + "%s_np" % key, arr)
                 print(time.time() - start_time, " seconds!")
                 del arr
                 gc.collect()
                 get_memory()
             # Deletes the hdf5 file
-            os.system("rm " + lindir + "mpi_icfields_nmesh%s.h5" % nmesh)
+            os.system("rm " + outdir + "mpi_icfields_nmesh%s.h5" % nmesh)
     else:
         if rank == 0:
             print("Wrote successfully! Took %d seconds" % (time.time() - start_time))

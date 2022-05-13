@@ -62,7 +62,7 @@ RUN pip install nose jupyter ipython
 RUN python3 -m pip install camb cython chaospy
 RUN python3 -m pip install mpi4py
 RUN FFTW_DIR=/usr python3 -m pip install mpi4py-fft --no-cache-dir
-RUN python3 -m pip install h5py
+RUN CC=mpicc HDF5_MPI="ON" python3 -m pip install h5py --no-cache-dir
 RUN python3 -m pip install sympy numexpr
 RUN echo "hello"
 RUN file="$(which mpicc)" && echo $file

@@ -1,0 +1,30 @@
+icdir: {ZAFile}
+ic_format: 'monofonic'
+nbody_format: 'gadget_hdf5'
+outdir: {AnzuOutputDir}
+particledir: {BoxOutputPath}/output/snapdir_000/snapshot_000.
+nmesh_in: {NpOneThird}
+nmesh_out: {NpOneThird}
+lbox: {BoxL}
+z_ic: {zini}
+compensate: True
+sim_type: 'Gadget_hdf5'
+save_advected_fields : False
+np_weightfields: False
+use_neutrinos: True
+
+Cosmology :
+  h: {h}
+  Omega_b: {OmegaB}
+  Omega_cdm: {OmegaCDM}
+  N_ur: 0.00641
+  N_ncdm: 1
+  output: 'mPk mTk'
+  z_pk: '0.0,99'
+  P_k_max_h/Mpc: 20.
+  m_ncdm: {nu_mass_ev_ov_3}
+  deg_ncdm: 3
+  T_cmb: 2.7255
+  A_s: {As}
+  n_s: {SpectralIndex}
+

@@ -36,7 +36,7 @@ def CompensateCICAliasing(w, v):
     return v
 
 
-def get_Nparts(snapfiles, sim_type):
+def get_Nparts(snapfiles, sim_type, parttype):
     """Count up the number of particles that will be read in by this rank.
 
     Args:
@@ -50,18 +50,21 @@ def get_Nparts(snapfiles, sim_type):
     for f in snapfiles:
         if sim_type == "Gadget_hdf5":
             block = h5py.File(f, "r")
-            npart += block["Header"].attrs["NumPart_ThisFile"][1]
+            npart += block["Header"].attrs["NumPart_ThisFile"][parttype]
             z_this = block["Header"].attrs["Redshift"]
+            mass = block["Header"].attrs["MassTable"][parttype]
             block.close()
         if sim_type == "Gadget":
+            if parttype != 1: raise(ValueError('Neutrino functionality not yet implemented for classic gadget outputs.'))
             header = readGadgetSnapshot(f, read_id=False, read_pos=False)
             npart += header["npart"][1]
             z_this = header["redshift"]
+            mass = 1
 
-    return npart, z_this
+    return npart, z_this, mass 
 
 
-def load_particles(basedir, sim_type, rank, size):
+def load_particles(basedir, sim_type, rank, size, parttype=1):
 
     if sim_type == "Gadget_hdf5":
         snapfiles = glob(basedir + "*hdf5")
@@ -70,26 +73,31 @@ def load_particles(basedir, sim_type, rank, size):
 
     snapfiles_this = snapfiles[rank::size]
     nfiles_this = len(snapfiles_this)
-    npart_this, z_this = get_Nparts(snapfiles_this, sim_type)
+    npart_this, z_this, mass  = get_Nparts(snapfiles_this, sim_type, parttype)
 
     pos = np.zeros((npart_this, 3))
-    ids = np.zeros(npart_this, dtype=np.int)
+    if parttype == 1:
+        ids = np.zeros(npart_this, dtype=np.int)
+    else:
+        #don't need ids for neutrinos, since not weighting
+        ids = None
 
     npart_counter = 0
-
     for i in range(nfiles_this):
         if sim_type == "Gadget_hdf5":
             block = h5py.File(snapfiles_this[i], "r")
             npart_block = block["Header"].attrs["NumPart_ThisFile"][1]
             pos[npart_counter : npart_counter + npart_block] = block[
-                "PartType1/Coordinates"
+                "PartType{}/Coordinates".format(parttype)
             ]
-            ids[npart_counter : npart_counter + npart_block] = block[
-                "PartType1/ParticleIDs"
-            ]
+            if parttype == 1:
+                ids[npart_counter : npart_counter + npart_block] = block[
+                    "PartType{}/ParticleIDs".format(parttype)
+                ]
             block.close()
 
         elif sim_type == "Gadget":
+            if parttype != 1: raise(ValueError('Neutrino functionality not yet implemented for classic gadget outputs.'))
             hdr, pos_i, ids_i = readGadgetSnapshot(
                 snapfiles_this[i], read_id=True, read_pos=True
             )
@@ -101,7 +109,7 @@ def load_particles(basedir, sim_type, rank, size):
 
         npart_counter += npart_block
 
-    return pos, ids, npart_this, z_this
+    return pos, ids, npart_this, z_this, mass
 
 
 def measure_basis_spectra(configs):
@@ -135,23 +143,54 @@ def measure_basis_spectra(configs):
         [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
     )
 
-    fieldlist = [
-        pm.create(type="real"),
-        pm.create(type="real"),
-        pm.create(type="real"),
-        pm.create(type="real"),
-        pm.create(type="real"),
-    ]
-
     if rank == 0:
         get_memory(rank)
         print("starting loop")
         sys.stdout.flush()
 
     # Load in a subset of the total gadget snapshot.
-    posvec, idvec, npart_this, zbox = load_particles(
+    posvec, idvec, npart_this, zbox, m_cb = load_particles(
         fdir, configs["sim_type"], rank, nranks
     )
+    
+    #if use_neutrinos=True, compute an additional set of basis spectra,
+    #where the unweighted field is the total matter field
+    #rather than the cb field. Separate this out to save memory.
+    if configs['use_neutrinos']:
+        posvec_nu, _, _, _, m_nu = load_particles(
+            fdir, configs["sim_type"], rank, nranks, parttype=2
+        )
+        posvec_tot = np.vstack([posvec, posvec_nu])
+        del posvec_nu
+        gc.collect()
+        m = np.zeros(len(posvec_tot))
+        m[:npart_this] = m_cb
+        m[npart_this:] = m_nu
+
+        keynames = ["1m"]
+        fieldlist = [pm.create(type="real")]
+        layout = pm.decompose(posvec_tot)
+        p = layout.exchange(posvec_tot)
+        del posvec_tot
+        gc.collect()
+        w = layout.exchange(m)
+        del m
+        gc.collect()
+        
+        pm.paint(p, out=fieldlist[-1], mass=w, resampler="cic")
+        del m
+    else:
+        keynames = []
+        fieldlist = []
+
+    keynames.extend(["1cb", "delta", "deltasq", "tidesq", "nablasq"])
+    fieldlist.extend([
+        pm.create(type="real"),
+        pm.create(type="real"),
+        pm.create(type="real"),
+        pm.create(type="real"),
+        pm.create(type="real"),
+    ])
 
     # Gadget has IDs starting with ID=1.
     # FastPM has ID=0
@@ -178,19 +217,16 @@ def measure_basis_spectra(configs):
     del posvec
     gc.collect()
 
-    # f = h5py.File(lindir+'mpi_icfields_nmesh%s.h5'%nmesh, 'r')
-    # keynames = list(f.keys())
-    keynames = ["1", "delta", "deltasq", "tidesq", "nablasq"]
     for k in range(len(fieldlist)):
+        if keynames[k] == '1m': continue #already handled this above
+        
         if rank == 0:
             print(k)
-        if k == 0:
+        if keynames[k] == '1cb':
             pm.paint(p, out=fieldlist[k], mass=1, resampler="cic")
         else:
-            # Now only load specific compfield. 1,2,3 is delta, delta^2, s^2
-            # compfield = np.load(componentdir+'reshape_componentfields_%s_%s.npy'%(rank,k), mmap_mode='r')
-            # Load in the given weight field
-            if config["np_weightfields"]:
+            # Now load specific compfield. 1,2,3 is delta, delta^2, s^2
+            if configs["np_weightfields"]:
                 arr = np.load(lindir + keynames[k] + "_np.npy", mmap_mode="r")
             else:
                 arr = h5py.File(lindir + "mpi_icfields_nmesh%s.h5" % nmesh, "r")[k][
@@ -204,7 +240,6 @@ def measure_basis_spectra(configs):
 
             # distribute weights properly
             m = layout.exchange(w)
-
             del w
             gc.collect()
 
@@ -228,12 +263,15 @@ def measure_basis_spectra(configs):
     get_memory(rank)
 
     # Normalize and mean-subtract the normal particle field.
-    fieldlist[0] = fieldlist[0] / fieldlist[0].cmean() - 1
+    fieldlist[0] = fieldlist[0] / fieldlist[0].cmean() - 1    
+    if '1m' in keynames:
+        fieldlist[1] = fieldlist[1] / fieldlist[1].cmean() - 1
+
     for k in range(len(fieldlist)):
         if rank == 0:
             print(np.mean(fieldlist[k].value), np.std(fieldlist[k].value))
             sys.stdout.flush()
-        if config["save_advected_fields"]:
+        if configs["save_advected_fields"]:
             np.save(
                 componentdir
                 + "latetime_weight_%s_%s_%s_rank%s" % (k, nmesh, fieldnameadd, rank),
@@ -249,16 +287,6 @@ def measure_basis_spectra(configs):
 
     #######################################################################################################################
     #################################### Adjusting for growth #############################################################
-
-    field_dict = {
-        "1": fieldlist[0],
-        r"$\delta_L$": fieldlist[1],
-        r"$\delta^2$": fieldlist[2],
-        r"$s^2$": fieldlist[3],
-        r"$\nabla^2\delta$": fieldlist[4],
-    }
-    labelvec = ["1", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
-
     pkclass = Class()
     pkclass.set(configs["Cosmology"])
     pkclass.compute()
@@ -268,38 +296,25 @@ def measure_basis_spectra(configs):
     D = D / pkclass.scale_independent_growth_factor(z_ic)
 
     mpiprint(D, rank)
-    # If not including nabla field
-    # growthratvec = np.array([1, D, D**2, D**2, D**3, D**4, D**2, D**3, D**4, D**4])
+    
+    if configs['use_neutrinos']:
+        labelvec = ["1m", "1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
+        field_D = [1, 1, D, D**2, D**2, D]
+    else:
+        labelvec = ["1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
+        field_D = [1, D, D**2, D**2, D]
+    
+    field_dict = dict(zip(labelvec, fieldlist))    
 
-    growthratvec = np.array(
-        [
-            1,
-            D,
-            D**2,
-            D**2,
-            D**3,
-            D**4,
-            D**2,
-            D**3,
-            D**4,
-            D**4,
-            D,
-            D**2,
-            D**3,
-            D**3,
-            D**2,
-        ]
-    )
     #######################################################################################################################
     #################################### Measuring P(k) ###################################################################
     kpkvec = []
-    #    rxivec = []
     pkcounter = 0
-    for i in range(5):
-        for j in range(5):
-            if i < j:
-                pass
-            if i >= j:
+    for i in range(len(keynames)):
+        for j in range(len(keynames)):
+            if (i < j) | (configs['use_neutrinos'] & (j==0) & (i==1)):
+                continue
+            elif i >= j:
                 pk = FFTPower(
                     field_dict[labelvec[i]],
                     "1d",
@@ -308,20 +323,16 @@ def measure_basis_spectra(configs):
                     Nmesh=nmesh,
                 )
 
-                # The xi measurements don't work great for now.
-                # xi = FFTCorr(field_dict[labelvec[i]], '1d', second = field_dict[labelvec[j]], BoxSize=Lbox, Nmesh=nmesh)
                 pkpower = pk.power["power"].real
-                # xicorr = xi.corr['corr'].real
                 if i == 0 and j == 0:
                     kpkvec.append(pk.power["k"])
-                #    rxivec.append(xi.corr['r'])
-                kpkvec.append(pkpower * growthratvec[pkcounter])
-                # rxivec.append(xicorr*growthratvec[pkcounter])
+
+                kpkvec.append(pkpower * field_D[i] * field_D[j])
+
                 pkcounter += 1
                 mpiprint(("pk done ", pkcounter), rank)
 
     kpkvec = np.array(kpkvec)
-    # rxivec = np.array(rxivec)
     if rank == 0:
         np.savetxt(
             componentdir
