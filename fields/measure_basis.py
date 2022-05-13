@@ -1,30 +1,28 @@
-import pmesh
-import numpy as np
-import time
-#from nbodykit.lab import FieldMesh
 from nbodykit.algorithms.fftpower import FFTPower
-# from nbodykit.algorithms.fftcorr import FFTCorr
-#from nbodykit.source.mesh import ArrayMesh
-import sys
-import gc
-import pyccl
-import pandas as pd
-import psutil
-import os
-import yaml
-from mpi4py import MPI
 from common_functions import readGadgetSnapshot
+from classy import Class
+from mpi4py import MPI
+from glob import glob
+import numpy as np
+import time, sys, gc, psutil, os, yaml
+import pmesh, h5py
+
+
 def get_memory(rank):
     process = psutil.Process(os.getpid())
-    print(process.memory_info().rss/1e9, "GB is current memory usage, rank ", rank)  # in bytes 
+    print(
+        process.memory_info().rss / 1e9, "GB is current memory usage, rank ", rank
+    )  # in bytes
 
 
-def mpiprint(text):
-    if rank==0:
+def mpiprint(text, rank):
+    if rank == 0:
         print(text)
         sys.stdout.flush()
     else:
         pass
+
+
 def CompensateCICAliasing(w, v):
     """
     Return the Fourier-space kernel that accounts for the convolution of
@@ -34,283 +32,310 @@ def CompensateCICAliasing(w, v):
     """
     for i in range(3):
         wi = w[i]
-        v = v / (1 - 2. / 3 * np.sin(0.5 * wi) ** 2) ** 0.5
+        v = v / (1 - 2.0 / 3 * np.sin(0.5 * wi) ** 2) ** 0.5
     return v
 
 
-################################### YAML /Initial Config stuff #################################
-yamldir = sys.argv[1]
+def get_Nparts(snapfiles, sim_type):
+    """Count up the number of particles that will be read in by this rank.
+
+    Args:
+        snapfiles list: List of blocks assigned to this rank
+        sim_type str: Type of simulation (format)
+
+    Returns:
+        npart int: Number of particles assigned to this rank.
+    """
+    npart = 0
+    for f in snapfiles:
+        if sim_type == "Gadget_hdf5":
+            block = h5py.File(f, "r")
+            npart += block["Header"].attrs["NumPart_ThisFile"][1]
+            z_this = block["Header"].attrs["Redshift"]
+            block.close()
+        if sim_type == "Gadget":
+            header = readGadgetSnapshot(f, read_id=False, read_pos=False)
+            npart += header["npart"][1]
+            z_this = header["redshift"]
+
+    return npart, z_this
 
 
-##PALLIATIVE 
-fieldnameadd = sys.argv[2]
+def load_particles(basedir, sim_type, rank, size):
+
+    if sim_type == "Gadget_hdf5":
+        snapfiles = glob(basedir + "*hdf5")
+    elif sim_type == "Gadget":
+        snapfiles = glob(basedir + "*")
+
+    snapfiles_this = snapfiles[rank::size]
+    nfiles_this = len(snapfiles_this)
+    npart_this, z_this = get_Nparts(snapfiles_this, sim_type)
+
+    pos = np.zeros((npart_this, 3))
+    ids = np.zeros(npart_this, dtype=np.int)
+
+    npart_counter = 0
+
+    for i in range(nfiles_this):
+        if sim_type == "Gadget_hdf5":
+            block = h5py.File(snapfiles_this[i], "r")
+            npart_block = block["Header"].attrs["NumPart_ThisFile"][1]
+            pos[npart_counter : npart_counter + npart_block] = block[
+                "PartType1/Coordinates"
+            ]
+            ids[npart_counter : npart_counter + npart_block] = block[
+                "PartType1/ParticleIDs"
+            ]
+            block.close()
+
+        elif sim_type == "Gadget":
+            hdr, pos_i, ids_i = readGadgetSnapshot(
+                snapfiles_this[i], read_id=True, read_pos=True
+            )
+            npart_block = hdr["npart"][1]
+            pos[npart_counter : npart_counter + npart_block] = pos_i
+            ids[npart_counter : npart_counter + npart_block] = ids_i
+        else:
+            raise (ValueError("Sim type must be either Gadget or GadgetHDF5"))
+
+        npart_counter += npart_block
+
+    return pos, ids, npart_this, z_this
 
 
-configs = yaml.load(open(yamldir, 'r'), yaml.FullLoader)
+def measure_basis_spectra(configs):
+    
+    lindir = configs["outdir"]
+    nmesh = configs["nmesh_in"]
+    Lbox = configs["lbox"]
+    compensate = bool(configs["compensate"])
+    fdir = configs["particledir"]
 
-lindir = configs['outdir']
+    # Save to wherever particles are
+    componentdir = configs["outdir"]
+    boxno = configs["aem_box"]
+    try:
+        testvar = configs["aem_testno"]
+    except:
+        testvar = ""
 
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-nranks = comm.Get_size()
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    nranks = comm.Get_size()
 
-nmesh = configs['nmesh_in'] 
+    start_time = time.time()
 
+    # ParticleMeshes for 1, delta, deltasq, tidesq, nablasq
+    # Make the late-time component fields
 
-bigarr = []
-start_time = time.time()
-Lbox = configs['lbox']
+    ################################################################################################
+    #################################### Advecting weights #########################################
+    pm = pmesh.pm.ParticleMesh(
+        [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
+    )
 
-compensate = bool(configs['compensate'])
+    fieldlist = [
+        pm.create(type="real"),
+        pm.create(type="real"),
+        pm.create(type="real"),
+        pm.create(type="real"),
+        pm.create(type="real"),
+    ]
 
+    if rank == 0:
+        get_memory(rank)
+        print("starting loop")
+        sys.stdout.flush()
 
-# fdir = '/oak/stanford/orgs/kipac/aemulus/aemulus_alpha/Box%03d/output/snapdir_%03d/snapshot_%03d.'%(boxno, snapdir, snapdir)
-fdir = configs['particledir']
+    # Load in a subset of the total gadget snapshot.
+    posvec, idvec, npart_this, zbox = load_particles(
+        fdir, configs["sim_type"], rank, nranks
+    )
 
-#Save to wherever particles are
-componentdir = configs['outdir']
-boxno = configs['aem_box']
-try:
-    testvar = configs['aem_testno']
-except:
-    testvar = ''
+    # Gadget has IDs starting with ID=1.
+    # FastPM has ID=0
+    # idfac decides which one to use
+    idfac = 1
+    if configs["sim_type"] == "FastPM":
+        idfac = 0
 
-start_time = time.time()
+    a_ic = ((idvec - idfac) // nmesh**2) % nmesh
+    b_ic = ((idvec - idfac) // nmesh) % nmesh
+    c_ic = (idvec - idfac) % nmesh
+    mpiprint(a_ic[3], rank)
+    a_ic = a_ic.astype(int)
+    b_ic = b_ic.astype(int)
+    c_ic = c_ic.astype(int)
+    # Figure out where each particle position is going to be distributed among mpi ranks
+    layout = pm.decompose(posvec)
 
-################################################################################################
-#################################### Advecting weights #########################################
-# componentdir = '/home/users/kokron/scratch/ptbias_emu/Box%03d/snapdir_%03d/'%(boxno, snapdir)
+    # Exchange positions
+    p = layout.exchange(posvec)
 
-# comps = glob(componentdir+'componentfields_*')
-
-
-#print(growthratio)
-
-# N = 5
-
-
-pm = pmesh.pm.ParticleMesh([nmesh, nmesh, nmesh], Lbox, dtype='float32', resampler='cic', comm=comm)
-
-
-#ParticleMeshes for 1, delta, deltasq, tidesq, nablasq
-#Make the late-time component fields
-fieldlist = [pm.create(type='real'),pm.create(type='real'),pm.create(type='real'),pm.create(type='real'),pm.create(type='real')]
-if rank==0:
-    get_memory(rank)
-    print('starting loop')
-    sys.stdout.flush()
-
-
-
-# #Load in component field for this part of fdir
-# compfield = np.fromfile(componentdir+'componentfields_%s.npy'%rank,dtype='float32')
-# compfield = compfield.reshape(len(compfield)//4, 4)
-# mpiprint('loaded compfield og')
-
-# randcat = np.zeros(shape=(len(compfield), 3), dtype='float32')
-
-
-
-# for i in range(4):
-#     np.save(componentdir+'reshape_componentfields_%s_%s.npy'%(rank,i+1), compfield[:,i])
-# del compfield
-# gc.collect()
-
-lenrand = 0
-
-#Load in a subset of the total gadget snapshot. 
-#TODO: this is hard-coded for Sherlock and Aemulus but should change for generic N-body sims.
-for i in range(16*rank, 16*(rank+1)):
-    gadgetsnap = readGadgetSnapshot(fdir+'%s'%i, read_id=True, read_pos=True)
-
-    gadgetpos = gadgetsnap[1]
-
-    gadgetidx = gadgetsnap[2]
-    if i == 16*rank:
-        posvec = 1.*gadgetpos
-        idvec = 1.*gadgetidx
-        mpiprint('here!')
-        mpiprint(posvec.shape)
-    else:
-        posvec = np.vstack((posvec, gadgetpos))
-        idvec = np.hstack((idvec, gadgetidx))
-    lenrand+=len(gadgetpos)
-    del gadgetsnap
+    mpiprint(("posvec shapes", posvec.shape), rank)
+    mpiprint(("idvec shapes", idvec.shape), rank)
+    del posvec
     gc.collect()
 
+    # f = h5py.File(lindir+'mpi_icfields_nmesh%s.h5'%nmesh, 'r')
+    # keynames = list(f.keys())
+    keynames = ["1", "delta", "deltasq", "tidesq", "nablasq"]
+    for k in range(len(fieldlist)):
+        if rank == 0:
+            print(k)
+        if k == 0:
+            pm.paint(p, out=fieldlist[k], mass=1, resampler="cic")
+        else:
+            # Now only load specific compfield. 1,2,3 is delta, delta^2, s^2
+            # compfield = np.load(componentdir+'reshape_componentfields_%s_%s.npy'%(rank,k), mmap_mode='r')
+            # Load in the given weight field
+            if config["np_weightfields"]:
+                arr = np.load(lindir + keynames[k] + "_np.npy", mmap_mode="r")
+            else:
+                arr = h5py.File(lindir + "mpi_icfields_nmesh%s.h5" % nmesh, "r")[k][
+                    "3D"
+                ]["2"]
 
-#Gadget has IDs starting with ID=1. 
-#FastPM has ID=0
-#idfac decides which one to use
-idfac = 1
-if configs['sim_type'] == 'FastPM':
-    idfac = 0
+            # Get weights
+            w = arr[a_ic, b_ic, c_ic]
 
-a_ic = ((idvec-idfac)//nmesh**2)%nmesh
-b_ic = ((idvec-idfac)//nmesh)%nmesh
-c_ic = (idvec-idfac)%nmesh
-mpiprint(a_ic[3])
-a_ic = a_ic.astype(int)
-b_ic = b_ic.astype(int)
-c_ic = c_ic.astype(int)
-#Figure out where each particle position is going to be distributed among mpi ranks
-layout = pm.decompose(posvec)
+            mpiprint(("w shapes", w.shape))
 
-#Exchange positions
-p = layout.exchange(posvec)
+            # distribute weights properly
+            m = layout.exchange(w)
 
-mpiprint(('posvec shapes', posvec.shape))
+            del w
+            gc.collect()
 
-mpiprint(('idvec shapes', idvec.shape))
-del posvec
-gc.collect()
+            get_memory(rank)
 
+            pm.paint(p, out=fieldlist[k], mass=m, resampler="cic")
+            sys.stdout.flush()
+            del m
+            gc.collect()
 
-
-# f = h5py.File(lindir+'mpi_icfields_nmesh%s.h5'%nmesh, 'r')
-# keynames = list(f.keys())
-keynames = ['1', 'delta', 'deltasq', 'tidesq', 'nablasq']
-for k in range(len(fieldlist)):
-    if rank==0:
-        print(k)
-    if k == 0:
-        pm.paint(p, out=fieldlist[k], mass = 1, resampler='cic')
-    else:
-        #Now only load specific compfield. 1,2,3 is delta, delta^2, s^2
-
-        # compfield = np.load(componentdir+'reshape_componentfields_%s_%s.npy'%(rank,k), mmap_mode='r')
-        #Load in the given weight field
-        arr = np.load(lindir+keynames[k]+'_np.npy', mmap_mode='r')
-       
-        #Get weights
-        w = arr[a_ic, b_ic, c_ic]
-
-
-        mpiprint(('w shapes', w.shape))
-
-        #distribute weights properly
-        m = layout.exchange(w)
-
-
-        del w
-        gc.collect()
-
-        get_memory(rank)
-
-        pm.paint(p, out=fieldlist[k], mass = m, resampler='cic')
+        # print('painted! ', rank)
         sys.stdout.flush()
-        del m
-        gc.collect()
 
-    #print('painted! ', rank)
-    sys.stdout.flush()
-if rank==0:
-    print(fieldlist[0].shape)
-del p
-gc.collect()
-if rank==0:
-    print('pasted')
-    sys.stdout.flush()
-get_memory(rank)
-
-#Normalize and mean-subtract the normal aprticle field.
-fieldlist[0] = fieldlist[0]/fieldlist[0].cmean() - 1
-for k in range(len(fieldlist)):
-    if rank==0:
-        print(np.mean(fieldlist[k].value), np.std(fieldlist[k].value))
+    if rank == 0:
+        print(fieldlist[0].shape)
+    del p
+    gc.collect()
+    if rank == 0:
+        print("pasted")
         sys.stdout.flush()
-    np.save(componentdir+'latetime_weight_%s_%s_%s_rank%s'%(k,nmesh,fieldnameadd,rank), fieldlist[k].value)
-    if compensate:
-        fieldlist[k] = fieldlist[k].r2c()
-        fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind='circular')
+    get_memory(rank)
 
-get_memory(rank)
-sys.stdout.flush()
+    # Normalize and mean-subtract the normal particle field.
+    fieldlist[0] = fieldlist[0] / fieldlist[0].cmean() - 1
+    for k in range(len(fieldlist)):
+        if rank == 0:
+            print(np.mean(fieldlist[k].value), np.std(fieldlist[k].value))
+            sys.stdout.flush()
+        if config["save_advected_fields"]:
+            np.save(
+                componentdir
+                + "latetime_weight_%s_%s_%s_rank%s" % (k, nmesh, fieldnameadd, rank),
+                fieldlist[k].value,
+            )
 
-#######################################################################################################################
-#################################### Adjusting for growth #############################################################
+        if compensate:
+            fieldlist[k] = fieldlist[k].r2c()
+            fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
 
-field_dict = {'1': fieldlist[0], r'$\delta_L$': fieldlist[1], r'$\delta^2$': fieldlist[2], r'$s^2$':fieldlist[3], r'$\nabla^2\delta$':fieldlist[4]}
-labelvec = ['1',r'$\delta_L$',  r'$\delta^2$',  r'$s^2$',r'$\nabla^2\delta$']
+    get_memory(rank)
+    sys.stdout.flush()
+
+    #######################################################################################################################
+    #################################### Adjusting for growth #############################################################
+
+    field_dict = {
+        "1": fieldlist[0],
+        r"$\delta_L$": fieldlist[1],
+        r"$\delta^2$": fieldlist[2],
+        r"$s^2$": fieldlist[3],
+        r"$\nabla^2\delta$": fieldlist[4],
+    }
+    labelvec = ["1", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
+
+    pkclass = Class()
+    pkclass.set(configs["Cosmology"])
+    pkclass.compute()
+
+    z_ic = configs["z_ic"]
+    D = pkclass.scale_independent_growth_factor(zbox)
+    D = D / pkclass.scale_independent_growth_factor(z_ic)
+
+    mpiprint(D, rank)
+    # If not including nabla field
+    # growthratvec = np.array([1, D, D**2, D**2, D**3, D**4, D**2, D**3, D**4, D**4])
+
+    growthratvec = np.array(
+        [
+            1,
+            D,
+            D**2,
+            D**2,
+            D**3,
+            D**4,
+            D**2,
+            D**3,
+            D**4,
+            D**4,
+            D,
+            D**2,
+            D**3,
+            D**3,
+            D**2,
+        ]
+    )
+    #######################################################################################################################
+    #################################### Measuring P(k) ###################################################################
+    kpkvec = []
+    #    rxivec = []
+    pkcounter = 0
+    for i in range(5):
+        for j in range(5):
+            if i < j:
+                pass
+            if i >= j:
+                pk = FFTPower(
+                    field_dict[labelvec[i]],
+                    "1d",
+                    second=field_dict[labelvec[j]],
+                    BoxSize=Lbox,
+                    Nmesh=nmesh,
+                )
+
+                # The xi measurements don't work great for now.
+                # xi = FFTCorr(field_dict[labelvec[i]], '1d', second = field_dict[labelvec[j]], BoxSize=Lbox, Nmesh=nmesh)
+                pkpower = pk.power["power"].real
+                # xicorr = xi.corr['corr'].real
+                if i == 0 and j == 0:
+                    kpkvec.append(pk.power["k"])
+                #    rxivec.append(xi.corr['r'])
+                kpkvec.append(pkpower * growthratvec[pkcounter])
+                # rxivec.append(xicorr*growthratvec[pkcounter])
+                pkcounter += 1
+                mpiprint(("pk done ", pkcounter), rank)
+
+    kpkvec = np.array(kpkvec)
+    # rxivec = np.array(rxivec)
+    if rank == 0:
+        np.savetxt(
+            componentdir
+            + "lakelag_mpi_pk_box%s_a%.2f_nmesh%s.txt" % (boxno, 1 / (zbox + 1), nmesh),
+            kpkvec,
+        )
+
+        print(time.time() - start_time)
 
 
-#Get the box redshift and cosmology to compute the growth factor. 
-#This is currently hard-coded to work with AEMULUS only. Make more general
-box_scale = readGadgetSnapshot(fdir+'0')[2]
-zbox = 1./box_scale - 1
-#Get growth factor 
-if 'Test' in fdir:
-    cosmofiles = pd.read_csv('/home/users/swmclau2/Git/pearce/pearce/mocks/test_cosmos.txt', sep=' ')
-    boxcosmo = cosmofiles.iloc[boxno]
-else:
-    cosmofiles = pd.read_csv('/home/users/kokron/Projects/lakelag/cosmos.txt', sep=' ')
-    boxcosmo = cosmofiles.iloc[boxno]
-cosmo = pyccl.Cosmology(Omega_b= boxcosmo['ombh2']/(boxcosmo['H0']/100)**2, Omega_c = boxcosmo['omch2']/(boxcosmo['H0']/100)**2, h = boxcosmo['H0']/100, n_s = boxcosmo['ns'], w0=boxcosmo['w0'], Neff=boxcosmo['Neff'],sigma8 = boxcosmo['sigma8'])
+if __name__ == "__main__":
+    ################################### YAML /Initial Config stuff #################################
+    yamldir = sys.argv[1]
+    fieldnameadd = sys.argv[2]
 
-
-#Aemulus boxes have IC at z=49
-z_ic=configs['z_ic']
-#Compute relative growth from IC to snapdir 
-growthratio = pyccl.growth_factor(cosmo, [box_scale])/pyccl.growth_factor(cosmo, 1./(1+z_ic))
-#Vector to rescale component spectra with appropriate linear growth factors.
-D = growthratio
-mpiprint(D)
-#If not including nabla field
-#growthratvec = np.array([1, D, D**2, D**2, D**3, D**4, D**2, D**3, D**4, D**4])
-
-growthratvec = np.array([1, D, D**2, D**2, D**3, D**4, D**2, D**3, D**4, D**4,
-                        D, D**2, D**3, D**3, D**2])
-#######################################################################################################################
-#################################### Measuring P(k) ###################################################################
-kpkvec = []
-rxivec = []
-pkcounter = 0
-for i in range(5):
-    for j in range(5):
-        if i<j:
-            pass
-        if i>=j:
-            pk = FFTPower(field_dict[labelvec[i]], '1d', second = field_dict[labelvec[j]], BoxSize=Lbox, Nmesh=nmesh)
-
-            #The xi measurements don't work great for now.
-            #xi = FFTCorr(field_dict[labelvec[i]], '1d', second = field_dict[labelvec[j]], BoxSize=Lbox, Nmesh=nmesh)
-            pkpower = pk.power['power'].real
-            #xicorr = xi.corr['corr'].real
-            if i==0 and j==0:
-                kpkvec.append(pk.power['k'])
-            #    rxivec.append(xi.corr['r'])
-            kpkvec.append(pkpower*growthratvec[pkcounter])
-            #rxivec.append(xicorr*growthratvec[pkcounter])
-            pkcounter+=1
-            mpiprint(('pk done ', pkcounter))
-
-
-
-kpkvec = np.array(kpkvec)
-#rxivec = np.array(rxivec)
-if rank==0:
-    np.savetxt(componentdir+'lakelag_mpi_pk_box%s_a%.2f_nmesh%s.txt'%(boxno,box_scale,nmesh), kpkvec)
-    #np.savetxt(componentdir+'lakelag_mpi_xi_box%s_snap%s_nmesh%s.txt'%(boxno,snapdir,nmesh), rxivec)
-    # os.system('rm -r '+componentdir+'reshape_componentfields_*')
-    #os.system('rm -r '+componentdir+'componentfields_*')
-    
-    print(time.time() - start_time)
-    # for k in range(compfield.shape[1] + 1):
-    #     if n == 0:
-    #         layout = pm.decompose(randcat)
-
-    #         p = layout.exchange(randcat)
-            
-    #         fieldlist[k] = RealField(pm)
-    #         test = pm.paint(p, out=fieldlist[k], mass = compfield[:,k], resampler='cic')
-
-    #     else:
-    #         layout = pm.decompose(randcat)
-
-    #         p = layout.exchange(randcat)
-            
-    #         field_update = RealField(pm)
-            
-    #         test = pm.paint(p, out=field_update, mass = compfield[:,k], resampler='cic')
-            
-    #         fieldlist[k] += field_update
+    configs = yaml.load(open(yamldir, "r"), yaml.FullLoader)
+    measure_basis_spectra(configs)
