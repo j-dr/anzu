@@ -12,6 +12,7 @@ sim_type: 'Gadget_hdf5'
 save_advected_fields : False
 np_weightfields: False
 use_neutrinos: True
+compute_cv_surrogate: True
 
 Cosmology :
   h: {h}

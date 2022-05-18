@@ -33,13 +33,18 @@ if __name__ == '__main__':
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
+    
+    if rank==0:
+        print('Constructing lagrangian fields')
+        make_lagfields(config)
 
     if rank==0:
         print('Processing basis spectra for {} snapshots'.format(nsnaps))
+        
         
     for i in range(nsnaps):
         if rank==0:
             print('Processing snapshot {}'.format(i))
             
         config['particledir'] = pdirs[i]
-        make_lagfields(config)
+        measure_basis_spectra(config)

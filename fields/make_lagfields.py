@@ -7,7 +7,7 @@ import sys
 import h5py
 import yaml
 import os
-from common_functions import get_memory, kroneckerdelta
+from .common_functions import get_memory, kroneckerdelta
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -154,7 +154,7 @@ def make_lagfields(configs):
     #load linear density field
     try:
         if configs['ic_format'] == 'monofonic':
-            bigmesh = h5py.File(lindir, 'r')['DM_delta']
+            bigmesh = -h5py.File(lindir, 'r')['DM_delta']
         else:
             bigmesh = np.load(lindir + "linICfield.npy", mmap_mode="r")
     except Exception as e:

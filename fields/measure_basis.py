@@ -1,5 +1,5 @@
+from .common_functions import readGadgetSnapshot
 from nbodykit.algorithms.fftpower import FFTPower
-from common_functions import readGadgetSnapshot
 from classy import Class
 from mpi4py import MPI
 from glob import glob
@@ -54,7 +54,7 @@ def get_Nparts(snapfiles, sim_type, parttype):
             z_this = block["Header"].attrs["Redshift"]
             mass = block["Header"].attrs["MassTable"][parttype]
             block.close()
-        if sim_type == "Gadget":
+        elif sim_type == "Gadget":
             if parttype != 1: raise(ValueError('Neutrino functionality not yet implemented for classic gadget outputs.'))
             header = readGadgetSnapshot(f, read_id=False, read_pos=False)
             npart += header["npart"][1]
@@ -63,17 +63,29 @@ def get_Nparts(snapfiles, sim_type, parttype):
 
     return npart, z_this, mass 
 
-
-def load_particles(basedir, sim_type, rank, size, parttype=1):
+def load_particles(basedir, sim_type, rank, size, parttype=1, cv_surrogate=False,
+                   icfile=None, icformat=None, D=None, nmesh=None, lbox=None,
+                   boltz=None, z_ic=None):
 
     if sim_type == "Gadget_hdf5":
         snapfiles = glob(basedir + "*hdf5")
     elif sim_type == "Gadget":
         snapfiles = glob(basedir + "*")
+    
+    if cv_surrogate:
+        assert(icfile is not None)
+        assert(icformat is not None)
+        assert(D is not None)
+        assert(nmesh is not None)
+        assert(lbox is not None)
+        
 
     snapfiles_this = snapfiles[rank::size]
     nfiles_this = len(snapfiles_this)
     npart_this, z_this, mass  = get_Nparts(snapfiles_this, sim_type, parttype)
+    
+    D = boltz.scale_independent_growth_factor(z_this)
+    D = D / boltz.scale_independent_growth_factor(z_ic)    
 
     pos = np.zeros((npart_this, 3))
     if parttype == 1:
@@ -82,34 +94,59 @@ def load_particles(basedir, sim_type, rank, size, parttype=1):
         #don't need ids for neutrinos, since not weighting
         ids = None
 
-    npart_counter = 0
-    for i in range(nfiles_this):
-        if sim_type == "Gadget_hdf5":
-            block = h5py.File(snapfiles_this[i], "r")
-            npart_block = block["Header"].attrs["NumPart_ThisFile"][1]
-            pos[npart_counter : npart_counter + npart_block] = block[
-                "PartType{}/Coordinates".format(parttype)
-            ]
-            if parttype == 1:
-                ids[npart_counter : npart_counter + npart_block] = block[
-                    "PartType{}/ParticleIDs".format(parttype)
+    if not cv_surrogate:
+        npart_counter = 0
+        for i in range(nfiles_this):
+
+            if sim_type == "Gadget_hdf5":
+                block = h5py.File(snapfiles_this[i], "r")
+                npart_block = block["Header"].attrs["NumPart_ThisFile"][1]
+                pos[npart_counter : npart_counter + npart_block] = block[
+                    "PartType{}/Coordinates".format(parttype)
                 ]
-            block.close()
+                if parttype == 1:
+                    ids[npart_counter : npart_counter + npart_block] = block[
+                        "PartType{}/ParticleIDs".format(parttype)
+                    ]
+                block.close()
 
-        elif sim_type == "Gadget":
-            if parttype != 1: raise(ValueError('Neutrino functionality not yet implemented for classic gadget outputs.'))
-            hdr, pos_i, ids_i = readGadgetSnapshot(
-                snapfiles_this[i], read_id=True, read_pos=True
-            )
-            npart_block = hdr["npart"][1]
-            pos[npart_counter : npart_counter + npart_block] = pos_i
-            ids[npart_counter : npart_counter + npart_block] = ids_i
+            elif sim_type == "Gadget":
+                if parttype != 1: raise(ValueError('Neutrino functionality not yet implemented for classic gadget outputs.'))
+                hdr, pos_i, ids_i = readGadgetSnapshot(
+                    snapfiles_this[i], read_id=True, read_pos=True
+                )
+                npart_block = hdr["npart"][1]
+                pos[npart_counter : npart_counter + npart_block] = pos_i
+                ids[npart_counter : npart_counter + npart_block] = ids_i
+            else:
+                raise (ValueError("Sim type must be either Gadget or GadgetHDF5"))
+
+            npart_counter += npart_block
+    else:
+        if icformat == 'monofonic':
+            n_ = [nmesh, nmesh, nmesh]
+            get_cell_idx = lambda i, j, k: (i * n_[1] + j) * n_[2] + k;
+            with open(icfile, 'r') as ics:
+                #read in displacements, rescale by D=D(z_this)/D(z_ini)
+                grid = np.meshgrid(np.arange(rank, nmesh, size), np.arange(nmesh), np.arange(nmesh), indexing='ij')
+                pos_x = ((grid[0] / nmesh + D * ics['DM_dx'][rank::size,...]) % 1) * lbox
+                pos_y = ((grid[1] / nmesh + D * ics['DM_dy'][rank::size,...]) % 1) * lbox
+                pos_z = ((grid[2] / nmesh + D * ics['DM_dz'][rank::size,...]) % 1) * lbox
+                pos = np.stack([pos_x, pos_y, pos_z])
+                pos = pos.reshape(3, -1).T
+                del pos_x, pos_y, pos_z
+                gc.collect()
+
+                ids = get_cell_idx(grid[0], grid[1], grid[2]).flatten()
+                del grid[0], grid[1], grid[2]
+                gc.collect()
+                
+                mass = 1
+                
         else:
-            raise (ValueError("Sim type must be either Gadget or GadgetHDF5"))
+            raise(ValueError('icformat {} is unsupported'.format(icformat)))
 
-        npart_counter += npart_block
-
-    return pos, ids, npart_this, z_this, mass
+    return pos, ids, npart_this, z_this, mass, D
 
 
 def measure_basis_spectra(configs):
@@ -119,19 +156,17 @@ def measure_basis_spectra(configs):
     Lbox = configs["lbox"]
     compensate = bool(configs["compensate"])
     fdir = configs["particledir"]
-
-    # Save to wherever particles are
     componentdir = configs["outdir"]
-    boxno = configs["aem_box"]
-    try:
-        testvar = configs["aem_testno"]
-    except:
-        testvar = ""
+    cv_surrogate = configs['compute_cv_surrogate']
+    #don't use neutrinos for CV surrogate. cb field should be fine.
+    if cv_surrogate:
+        use_neutrinos = False
+    else:
+        use_neutrinos = configs['use_neutrinos']
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     nranks = comm.Get_size()
-
     start_time = time.time()
 
     # ParticleMeshes for 1, delta, deltasq, tidesq, nablasq
@@ -147,17 +182,25 @@ def measure_basis_spectra(configs):
         get_memory(rank)
         print("starting loop")
         sys.stdout.flush()
+        
+    pkclass = Class()
+    pkclass.set(configs["Cosmology"])
+    pkclass.compute()
+
+    z_ic = configs["z_ic"]
 
     # Load in a subset of the total gadget snapshot.
-    posvec, idvec, npart_this, zbox, m_cb = load_particles(
-        fdir, configs["sim_type"], rank, nranks
+    posvec, idvec, npart_this, zbox, m_cb, D = load_particles(
+        fdir, configs["sim_type"], rank, nranks, cv_surrogate=cv_surrogate,
+        icfile=configs['icdir'], icformat=configs['icformat'], boltz=pkclass,
+        nmesh=configs['nmesh_in'], lbox=configs['lbox'], z_ic=z_ic
     )
     
     #if use_neutrinos=True, compute an additional set of basis spectra,
     #where the unweighted field is the total matter field
     #rather than the cb field. Separate this out to save memory.
-    if configs['use_neutrinos']:
-        posvec_nu, _, _, _, m_nu = load_particles(
+    if use_neutrinos:
+        posvec_nu, _, _, _, m_nu, _ = load_particles(
             fdir, configs["sim_type"], rank, nranks, parttype=2
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
@@ -196,13 +239,13 @@ def measure_basis_spectra(configs):
     # FastPM has ID=0
     # idfac decides which one to use
     idfac = 1
-    if configs["sim_type"] == "FastPM":
+    if (configs["sim_type"] == "FastPM") | (configs['ic_format']=='monofonic'):
         idfac = 0
 
     a_ic = ((idvec - idfac) // nmesh**2) % nmesh
     b_ic = ((idvec - idfac) // nmesh) % nmesh
     c_ic = (idvec - idfac) % nmesh
-    mpiprint(a_ic[3], rank)
+
     a_ic = a_ic.astype(int)
     b_ic = b_ic.astype(int)
     c_ic = c_ic.astype(int)
@@ -287,17 +330,11 @@ def measure_basis_spectra(configs):
 
     #######################################################################################################################
     #################################### Adjusting for growth #############################################################
-    pkclass = Class()
-    pkclass.set(configs["Cosmology"])
-    pkclass.compute()
 
-    z_ic = configs["z_ic"]
-    D = pkclass.scale_independent_growth_factor(zbox)
-    D = D / pkclass.scale_independent_growth_factor(z_ic)
 
     mpiprint(D, rank)
     
-    if configs['use_neutrinos']:
+    if use_neutrinos:
         labelvec = ["1m", "1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
         field_D = [1, 1, D, D**2, D**2, D]
     else:
@@ -312,7 +349,7 @@ def measure_basis_spectra(configs):
     pkcounter = 0
     for i in range(len(keynames)):
         for j in range(len(keynames)):
-            if (i < j) | (configs['use_neutrinos'] & (j==0) & (i==1)):
+            if (i < j) | (use_neutrinos & (j==0) & (i==1)):
                 continue
             elif i >= j:
                 pk = FFTPower(
@@ -336,7 +373,7 @@ def measure_basis_spectra(configs):
     if rank == 0:
         np.savetxt(
             componentdir
-            + "lakelag_mpi_pk_box%s_a%.2f_nmesh%s.txt" % (boxno, 1 / (zbox + 1), nmesh),
+            + "lakelag_mpi_pk_a%.2f_nmesh%s.txt" % (1 / (zbox + 1), nmesh),
             kpkvec,
         )
 
