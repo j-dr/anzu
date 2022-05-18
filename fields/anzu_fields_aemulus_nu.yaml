@@ -13,6 +13,7 @@ save_advected_fields : False
 np_weightfields: False
 use_neutrinos: True
 compute_cv_surrogate: True
+surrogate_gaussian_cutoff: True
 
 Cosmology :
   h: {h}

@@ -13,6 +13,7 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nranks = comm.Get_size()
 
+
 def MPI_mean(array, nmesh):
     """
     Computes the mean of an array that is slab-decomposed across multiple processes.
@@ -137,42 +138,140 @@ def delta_to_gradsqdelta(delta_k, nmesh, lbox, rank, nranks, fft):
 
     real_gradsqdelta = fft.backward(ksqdelta)
 
-    return real_gradsqdelta 
+    return real_gradsqdelta
+
+
+def gaussian_filter(field, nmesh, lbox, rank, nranks, fft, kcut):
+    """
+    Apply a fourier space gaussian filter to a field
+
+    Inputs:
+    field: the field to filter
+    nmesh: size of the mesh
+    lbox: size of the box
+    rank: current MPI rank
+    nranks: total number of MPI ranks
+    fft: PFFT fourier transform object. Used to do the backwards FFT
+    kcut: The exponential cutoff to use in the gaussian filter
+
+    Outputs:
+    f_filt: Gaussian filtered version of field
+    """
+
+    fhat = fft.forward(field, normalize=True)
+    kvals = np.fft.fftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
+    kvalsmpi = kvals[rank * nmesh // nranks : (rank + 1) * nmesh // nranks]
+    kvalsr = np.fft.rfftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
+
+    kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
+    filter = np.exp(-(kx**2 + ky**2 + kz**2) / (2 * kcut**2))
+    fhat = filter * fhat
+    del filter, kx, ky, kz
+    
+    f_filt = fft.backward(fhat)
+
+    return f_filt
+
 
 def make_lagfields(configs):
 
-    if configs['ic_format'] == 'monofonic':
-        lindir = configs['icdir']
+    if configs["ic_format"] == "monofonic":
+        lindir = configs["icdir"]
     else:
         lindir = configs["outdir"]
 
-    outdir = configs['outdir']
+    outdir = configs["outdir"]
     nmesh = configs["nmesh_in"]
     start_time = time.time()
     Lbox = configs["lbox"]
+    compute_surrogate_cv = configs["compute_surrogate_cv"]
+    if compute_surrogate_cv:
+        basename = 'mpi_icfields_nmesh_filt'
+        if configs["surrogate_gaussian_cutoff"]:
+            gaussian_kcut = np.pi * nmesh / Lbox
+    else:
+        basename = 'mpi_icfields_nmesh'
 
-    #load linear density field
+    # load linear density field (and displacements for surrogates)
     try:
-        if configs['ic_format'] == 'monofonic':
-            bigmesh = -h5py.File(lindir, 'r')['DM_delta']
+        if configs["ic_format"] == "monofonic":
+            ics = h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD)
+            bigmesh = -ics["DM_delta"]
+
+            if compute_surrogate_cv:
+                psi_x = ics["DM_dx"]
+                psi_y = ics["DM_dy"]
+                psi_z = ics["DM_dz"]
         else:
             bigmesh = np.load(lindir + "linICfield.npy", mmap_mode="r")
     except Exception as e:
-        if configs['ic_format'] == 'monofonic':
-            print("Couldn't find {}. Make sure you've produced  \\\
-                   with generic output format.")
+        if configs["ic_format"] == "monofonic":
+            print(
+                "Couldn't find {}. Make sure you've produced  \\\
+                   with generic output format."
+            )
         else:
-            print("Have you run ic_binary_to_field.py yet? Did not find the right file.")
-        raise(e)
-    
+            print(
+                "Have you run ic_binary_to_field.py yet? Did not find the right file."
+            )
+        raise (e)
+
     N = np.array([nmesh, nmesh, nmesh], dtype=int)
-    fft = PFFT(MPI.COMM_WORLD, N, axes=(0, 1, 2), dtype="float32", grid=(-1,))    
+    fft = PFFT(MPI.COMM_WORLD, N, axes=(0, 1, 2), dtype="float32", grid=(-1,))
     u = newDistArray(fft, False)
 
     # Slab-decompose the noiseless ICs along the distributed array
     u[:] = bigmesh[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :].astype(
         u.dtype
     )
+
+    if compute_surrogate_cv:
+        u = gaussian_filter(u, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
+        p_x = newDistArray(fft, False)
+        p_y = newDistArray(fft, False)
+        p_z = newDistArray(fft, False)
+
+        p_x[:] = psi_x[
+            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+        ].astype(psi_x.dtype)
+        p_x = gaussian_filter(p_x, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
+#        del psi_x
+
+        p_y[:] = psi_y[
+            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+        ].astype(psi_y.dtype)
+        p_y = gaussian_filter(p_y, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
+#        del psi_y
+
+        p_z[:] = psi_z[
+            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+        ].astype(psi_z.dtype)
+        p_z = gaussian_filter(p_z, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
+#        del psi_z
+
+        ics = h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD)
+        dset = ics.create_dataset(
+            "DM_dx_filt", (nmesh, nmesh, nmesh), dtype=psi_x.dtype
+        )
+        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_x[
+            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+        ]
+
+        dset = ics.create_dataset(
+            "DM_dy_filt", (nmesh, nmesh, nmesh), dtype=psi_y.dtype
+        )
+        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_y[
+            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+        ]
+
+        dset = ics.create_dataset(
+            "DM_dz_filt", (nmesh, nmesh, nmesh), dtype=psi_z.dtype
+        )
+        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_z[
+            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+        ]
+
+        del p_x, p_y, p_z
 
     # Compute the delta^2 field. This operation is local in real space.
     d2 = newDistArray(fft, False)
@@ -185,14 +284,14 @@ def make_lagfields(configs):
         print(dmean, " mean deltasq")
 
     # Parallel-write delta^2 to hdf5 file
-    d2.write(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "deltasq", step=2)
+    d2.write(outdir + "{}_{}.h5".format(basename, nmesh), "deltasq", step=2)
 
     # Free up memory
     del d2, dmean
     gc.collect()
 
     # Write the linear density field to hdf5
-    u.write(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "delta", step=2)
+    u.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta", step=2)
 
     # Take a forward FFT of the linear density
     u_hat = fft.forward(u, normalize=True)
@@ -218,7 +317,7 @@ def make_lagfields(configs):
         print(vmean, " mean tidesq")
     v -= vmean
 
-    v.write(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "tidesq", step=2)
+    v.write(outdir + "{}_{}.h5".format(basename, nmesh), "tidesq", step=2)
 
     # clear up space yet again
     del v, tinyfft, vmean
@@ -231,7 +330,7 @@ def make_lagfields(configs):
 
     v[:] = nablasq
 
-    v.write(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "nablasq", step=2)
+    v.write(outdir + "{}_{}.h5".format(basename, nmesh), "nablasq", step=2)
     # Moar space
     del u, bigmesh, deltak, u_hat, fft, v
     gc.collect()
@@ -243,18 +342,18 @@ def make_lagfields(configs):
             print("Wrote successfully! Now must convert to .npy files")
             print(time.time() - start_time, " seconds!")
             get_memory()
-            f = h5py.File(outdir + "mpi_icfields_nmesh%s.h5" % nmesh, "r")
+            f = h5py.File(outdir + "{}_{}.h5".format(basename, nmesh), "r")
             fkeys = list(f.keys())
             for key in fkeys:
                 arr = f[key]["3D"]["2"]
                 print("converting " + key + " to numpy array")
-                np.save(outdir + "%s_np" % key, arr)
+                np.save(outdir + "{}_{}_{}_np".format(basename, nmesh, key), arr)
                 print(time.time() - start_time, " seconds!")
                 del arr
                 gc.collect()
                 get_memory()
             # Deletes the hdf5 file
-            os.system("rm " + outdir + "mpi_icfields_nmesh%s.h5" % nmesh)
+            os.system("rm " + outdir + "{}_{}.h5".format(basename, nmesh))
     else:
         if rank == 0:
             print("Wrote successfully! Took %d seconds" % (time.time() - start_time))
@@ -263,5 +362,5 @@ def make_lagfields(configs):
 if __name__ == "__main__":
     yamldir = sys.argv[1]
     configs = yaml.load(open(yamldir, "r"))
-    
+
     make_lagfields(configs)
