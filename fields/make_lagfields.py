@@ -184,8 +184,8 @@ def make_lagfields(configs):
     nmesh = configs["nmesh_in"]
     start_time = time.time()
     Lbox = configs["lbox"]
-    compute_surrogate_cv = configs["compute_surrogate_cv"]
-    if compute_surrogate_cv:
+    compute_cv_surrogate = configs["compute_cv_surrogate"]
+    if compute_cv_surrogate:
         basename = 'mpi_icfields_nmesh_filt'
         if configs["surrogate_gaussian_cutoff"]:
             gaussian_kcut = np.pi * nmesh / Lbox
@@ -198,7 +198,7 @@ def make_lagfields(configs):
             ics = h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD)
             bigmesh = -ics["DM_delta"]
 
-            if compute_surrogate_cv:
+            if compute_cv_surrogate:
                 psi_x = ics["DM_dx"]
                 psi_y = ics["DM_dy"]
                 psi_z = ics["DM_dz"]
@@ -225,7 +225,7 @@ def make_lagfields(configs):
         u.dtype
     )
 
-    if compute_surrogate_cv:
+    if compute_cv_surrogate:
         u = gaussian_filter(u, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
         p_x = newDistArray(fft, False)
         p_y = newDistArray(fft, False)

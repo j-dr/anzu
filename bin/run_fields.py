@@ -1,19 +1,22 @@
 import numpy as np
+#import sys
+#sys.path.insert(0, '/pscratch/sd/j/jderose/anzu/')
 from fields.make_lagfields import make_lagfields
 from fields.measure_basis import measure_basis_spectra
 from mpi4py import MPI
 from copy import copy
 from glob import glob
 from yaml import Loader 
-import sys
+import sys, yaml
+
+
 
 if __name__ == '__main__':
     
     config = sys.argv[1]
-    if len(sys.argv) > 2:
-        globsnaps = True
-    else:
-        globsnaps = False
+    with open(config, 'r') as fp:
+        config = yaml.load(fp, Loader=Loader)
+        globsnaps = config['globsnaps']
         
     if globsnaps:
         snapdir = '/'.join(config['particledir'].split('/')[:-1])
@@ -35,27 +38,28 @@ if __name__ == '__main__':
     rank = comm.Get_rank()
     size = comm.Get_size()
     
-    if config['compute_surrogate_cv']:
+    if config['compute_cv_surrogate']:
         config_surr = copy(config)
-        config['compute_surrogate_cv'] = False
+        config['compute_cv_surrogate'] = False
     
     if rank==0:
-        print('Constructing lagrangian fields')
-        make_lagfields(config)
+        print('Constructing lagrangian fields', flush=True)
+
+    make_lagfields(config)
         
-        if config['compute_surrogate_cv']:
-            make_lagfields(config_surr)
+    if config['compute_cv_surrogate']:
+        make_lagfields(config_surr)
 
     if rank==0:
-        print('Processing basis spectra for {} snapshots'.format(nsnaps))
+        print('Processing basis spectra for {} snapshots'.format(nsnaps), flush=True)
         
         
     for i in range(nsnaps):
         if rank==0:
-            print('Processing snapshot {}'.format(i))
+            print('Processing snapshot {}'.format(i), flush=True)
             
         config['particledir'] = pdirs[i]
         measure_basis_spectra(config)
         
-        if config['compute_surrogate_cv']:
+        if config['compute_cv_surrogate']:
             measure_basis_spectra(config_surr)
