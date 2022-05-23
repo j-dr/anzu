@@ -196,7 +196,7 @@ def make_lagfields(configs):
     try:
         if configs["ic_format"] == "monofonic":
             ics = h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD)
-            bigmesh = -ics["DM_delta"]
+            bigmesh = ics["DM_delta"]
 
             if compute_cv_surrogate:
                 psi_x = ics["DM_dx"]
@@ -221,7 +221,7 @@ def make_lagfields(configs):
     u = newDistArray(fft, False)
 
     # Slab-decompose the noiseless ICs along the distributed array
-    u[:] = bigmesh[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :].astype(
+    u[:] = -bigmesh[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :].astype(
         u.dtype
     )
 
