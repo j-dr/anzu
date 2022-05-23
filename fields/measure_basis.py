@@ -77,7 +77,7 @@ def load_particles(
     parttype=1,
     cv_surrogate=False,
     icfile=None,
-    icformat=None,
+    ic_format=None,
     D=None,
     nmesh=None,
     lbox=None,
@@ -92,7 +92,7 @@ def load_particles(
 
     if cv_surrogate:
         assert icfile is not None
-        assert icformat is not None
+        assert ic_format is not None
         assert D is not None
         assert nmesh is not None
         assert lbox is not None
@@ -145,7 +145,7 @@ def load_particles(
 
             npart_counter += npart_block
     else:
-        if icformat == "monofonic":
+        if ic_format == "monofonic":
             n_ = [nmesh, nmesh, nmesh]
             get_cell_idx = lambda i, j, k: (i * n_[1] + j) * n_[2] + k
             with open(icfile, "r") as ics:
@@ -177,7 +177,7 @@ def load_particles(
                 mass = 1
 
         else:
-            raise (ValueError("icformat {} is unsupported".format(icformat)))
+            raise (ValueError("ic_format {} is unsupported".format(ic_format)))
 
     return pos, ids, npart_this, z_this, mass, D
 
@@ -232,7 +232,7 @@ def measure_basis_spectra(configs):
         nranks,
         cv_surrogate=cv_surrogate,
         icfile=configs["icdir"],
-        icformat=configs["icformat"],
+        ic_format=configs["ic_format"],
         boltz=pkclass,
         nmesh=configs["nmesh_in"],
         lbox=configs["lbox"],
