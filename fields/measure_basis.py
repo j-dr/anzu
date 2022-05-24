@@ -236,7 +236,7 @@ def measure_basis_spectra(configs):
         boltz=pkclass,
         nmesh=configs["nmesh_in"],
         lbox=configs["lbox"],
-        z_ic=z_ic,
+        z_ic=z_ic
     )
 
     # if use_neutrinos=True, compute an additional set of basis spectra,
@@ -245,6 +245,7 @@ def measure_basis_spectra(configs):
     if use_neutrinos:
         posvec_nu, _, _, _, m_nu, _ = load_particles(
             fdir, configs["sim_type"], rank, nranks, parttype=2
+            boltz=pkclass, z_ic=z_ic
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
         del posvec_nu
