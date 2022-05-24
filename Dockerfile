@@ -74,5 +74,5 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 RUN git clone https://github.com/lesgourg/class_public.git class && cd class && make
 RUN python3 -m pip install -v git+https://github.com/sfschen/velocileptors
 RUN python3 -m pip install matplotlib
-ENV CSBUST=9
+ENV CSBUST=10
 RUN git clone https://github.com/j-dr/anzu.git && cd anzu && git checkout aemulus_nu && python3 setup.py clean --all && python3 setup.py install

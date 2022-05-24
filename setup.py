@@ -7,6 +7,6 @@ setup(
     package_dir={'anzu' : 'anzu',
                  'fields' :'fields'},
     scripts=['bin/run_fields.py'],
-    package_data={'anzu': ['data/*']},
+#    package_data={'anzu': ['data/*']},
     long_description=open('README.md').read(),
     )
