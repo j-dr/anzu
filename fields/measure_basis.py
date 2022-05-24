@@ -117,7 +117,7 @@ def load_particles(
 
             if sim_type == "Gadget_hdf5":
                 block = h5py.File(snapfiles_this[i], "r")
-                npart_block = block["Header"].attrs["NumPart_ThisFile"][1]
+                npart_block = block["Header"].attrs["NumPart_ThisFile"][parttype]
                 pos[npart_counter : npart_counter + npart_block] = block[
                     "PartType{}/Coordinates".format(parttype)
                 ]
