@@ -265,7 +265,7 @@ def measure_basis_spectra(configs):
         gc.collect()
 
         pm.paint(p, out=fieldlist[-1], mass=w, resampler="cic")
-        del m
+
     else:
         keynames = []
         fieldlist = []
