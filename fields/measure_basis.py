@@ -244,7 +244,7 @@ def measure_basis_spectra(configs):
     # rather than the cb field. Separate this out to save memory.
     if use_neutrinos:
         posvec_nu, _, _, _, m_nu, _ = load_particles(
-            fdir, configs["sim_type"], rank, nranks, parttype=2
+            fdir, configs["sim_type"], rank, nranks, parttype=2,
             boltz=pkclass, z_ic=z_ic
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
