@@ -226,68 +226,68 @@ def make_lagfields(configs):
     )
 
     if compute_cv_surrogate:
-        u = gaussian_filter(u, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
-        p_x = newDistArray(fft, False)
-        p_y = newDistArray(fft, False)
-        p_z = newDistArray(fft, False)
+        u_filt = gaussian_filter(u, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
+        del u
+
+        p_x = newDistArray(fft, False, val=1)
+        p_y = newDistArray(fft, False, val=2)
+        p_z = newDistArray(fft, False, val=3)
 
         p_x[:] = psi_x[
             rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
         ].astype(psi_x.dtype)
-        p_x = gaussian_filter(p_x, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
-#        del psi_x
-
         p_y[:] = psi_y[
             rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
         ].astype(psi_y.dtype)
-        p_y = gaussian_filter(p_y, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
-#        del psi_y
-
         p_z[:] = psi_z[
             rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
         ].astype(psi_z.dtype)
-        p_z = gaussian_filter(p_z, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
-#        del psi_z
         ics.close()
+
+        #have to write out after each filter step, since mpi4py-fft will
+        #overwrite arrays otherwise
         
-        ics = h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD)
+        with h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
+            dset_delta = ics.create_dataset(
+                "DM_delta_filt", (nmesh, nmesh, nmesh), dtype=u_filt.dtype
+            )
+            dset_delta[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = u_filt[:]
+            del u_filt
+
+        p_x_filt = gaussian_filter(p_x, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
+        del p_x
+        with h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
+            dset_dx = ics.create_dataset(
+                "DM_dx_filt", (nmesh, nmesh, nmesh), dtype=psi_x.dtype
+            )
+            dset_dx[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_x_filt[:]
+            del p_x_filt
+            
+        p_y_filt = gaussian_filter(p_y, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
+        del p_y
+        with h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
+            dset_dy = ics.create_dataset(
+                "DM_dy_filt", (nmesh, nmesh, nmesh), dtype=psi_y.dtype
+            )
+            dset_dy[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_y_filt[:]
+            del p_y_filt
+
+        p_z_filt = gaussian_filter(p_z, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
+        del p_z
+        with h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
+            dset_dz = ics.create_dataset(
+                "DM_dz_filt", (nmesh, nmesh, nmesh), dtype=psi_z.dtype
+            )
+            dset_dz[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_z_filt[:]
+            del p_z_filt
+
         if rank==0:
-            print('p_x shape: {}'.format(p_x.shape), flush=True)
-        dset = ics.create_dataset(
-            "DM_delta_filt", (nmesh, nmesh, nmesh), dtype=u.dtype
-        )
-        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = u[:]
-        
-        dset = ics.create_dataset(
-            "DM_dx_filt", (nmesh, nmesh, nmesh), dtype=psi_x.dtype
-        )
-        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_x[:]
-        #[
-#            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
-#        ]
+            print('done filtering', flush=True)
 
-        dset = ics.create_dataset(
-            "DM_dy_filt", (nmesh, nmesh, nmesh), dtype=psi_y.dtype
-        )
-        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_y[:]
-        #[
-        #rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
-        #]
-
-        dset = ics.create_dataset(
-            "DM_dz_filt", (nmesh, nmesh, nmesh), dtype=psi_z.dtype
-        )
-        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_z[:]
-        #[
-        #rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
-        #]
-
-        del p_x, p_y, p_z
-
-        up = newDistArray(fft, False)
-        up[:] = u
-        u = up
-        ics.close()
+        u = newDistArray(fft, False)
+        with h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
+            u[:] = ics['DM_delta_filt'][rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :]
+            
 
     # Compute the delta^2 field. This operation is local in real space.
     d2 = newDistArray(fft, False)
@@ -306,12 +306,6 @@ def make_lagfields(configs):
     del d2, dmean
     gc.collect()
 
-    # Write the linear density field to hdf5
-#    if compute_cv_surrogate:
-#        up = newDistArray(fft, False)
-#        up[:] = u
-#        up.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta", step=2)
-#    else:
     u.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta", step=2)
         
     # Take a forward FFT of the linear density

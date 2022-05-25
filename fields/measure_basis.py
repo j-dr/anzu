@@ -169,7 +169,7 @@ def load_particles(
                 del pos_x, pos_y, pos_z
                 gc.collect()
 
-                ids = get_cell_idx(grid[0], grid[1], grid[2]).flatten()
+                ids = get_cell_idx(grid[0], grid[1], grid[2])
                 del grid
                 gc.collect()
 
@@ -322,29 +322,29 @@ def measure_basis_spectra(configs):
                     lindir + "{}_{}_{}_np.npy".format(basename, nmesh, keynames[k]),
                     mmap_mode="r",
                 )
+
+                if cv_surrogate:
+                    w = arr[rank::nranks,...].flatten()
+                else:
+                    w = arr[a_ic, b_ic, c_ic]                                        
             else:
                 arr = h5py.File(lindir + "{}_{}.h5".format(basename, nmesh), "r")[keynames[k]]["3D"][
                     "2"
                 ]
-
-            # Get weights
-            w = arr[a_ic, b_ic, c_ic]
-
-            mpiprint(("w shapes", w.shape), rank)
+                w = arr[rank::nranks, ...].flatten()
 
             # distribute weights properly
             m = layout.exchange(w)
             del w
             gc.collect()
 
-            get_memory(rank)
+#            get_memory(rank)
 
             pm.paint(p, out=fieldlist[k], mass=m, resampler="cic")
             sys.stdout.flush()
             del m
             gc.collect()
 
-        # print('painted! ', rank)
         sys.stdout.flush()
 
     if rank == 0:
@@ -354,7 +354,7 @@ def measure_basis_spectra(configs):
     if rank == 0:
         print("pasted")
         sys.stdout.flush()
-    get_memory(rank)
+#    get_memory(rank)
 
     # Normalize and mean-subtract the normal particle field.
     fieldlist[0] = fieldlist[0] / fieldlist[0].cmean() - 1
@@ -376,7 +376,7 @@ def measure_basis_spectra(configs):
             fieldlist[k] = fieldlist[k].r2c()
             fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
 
-    get_memory(rank)
+#    get_memory(rank)
     sys.stdout.flush()
 
     #######################################################################################################################
