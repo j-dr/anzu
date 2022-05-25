@@ -248,30 +248,46 @@ def make_lagfields(configs):
         ].astype(psi_z.dtype)
         p_z = gaussian_filter(p_z, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
 #        del psi_z
-
+        ics.close()
+        
         ics = h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD)
+        if rank==0:
+            print('p_x shape: {}'.format(p_x.shape), flush=True)
+        dset = ics.create_dataset(
+            "DM_delta_filt", (nmesh, nmesh, nmesh), dtype=u.dtype
+        )
+        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = u[:]
+        
         dset = ics.create_dataset(
             "DM_dx_filt", (nmesh, nmesh, nmesh), dtype=psi_x.dtype
         )
-        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_x[
-            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
-        ]
+        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_x[:]
+        #[
+#            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+#        ]
 
         dset = ics.create_dataset(
             "DM_dy_filt", (nmesh, nmesh, nmesh), dtype=psi_y.dtype
         )
-        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_y[
-            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
-        ]
+        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_y[:]
+        #[
+        #rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+        #]
 
         dset = ics.create_dataset(
             "DM_dz_filt", (nmesh, nmesh, nmesh), dtype=psi_z.dtype
         )
-        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_z[
-            rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
-        ]
+        dset[rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :] = p_z[:]
+        #[
+        #rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
+        #]
 
         del p_x, p_y, p_z
+
+        up = newDistArray(fft, False)
+        up[:] = u
+        u = up
+        ics.close()
 
     # Compute the delta^2 field. This operation is local in real space.
     d2 = newDistArray(fft, False)
@@ -291,8 +307,13 @@ def make_lagfields(configs):
     gc.collect()
 
     # Write the linear density field to hdf5
+#    if compute_cv_surrogate:
+#        up = newDistArray(fft, False)
+#        up[:] = u
+#        up.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta", step=2)
+#    else:
     u.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta", step=2)
-
+        
     # Take a forward FFT of the linear density
     u_hat = fft.forward(u, normalize=True)
     if rank == 0:

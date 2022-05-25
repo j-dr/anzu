@@ -93,7 +93,6 @@ def load_particles(
     if cv_surrogate:
         assert icfile is not None
         assert ic_format is not None
-        assert D is not None
         assert nmesh is not None
         assert lbox is not None
 
@@ -148,7 +147,7 @@ def load_particles(
         if ic_format == "monofonic":
             n_ = [nmesh, nmesh, nmesh]
             get_cell_idx = lambda i, j, k: (i * n_[1] + j) * n_[2] + k
-            with open(icfile, "r") as ics:
+            with h5py.File(icfile, "r") as ics:
                 # read in displacements, rescale by D=D(z_this)/D(z_ini)
                 grid = np.meshgrid(
                     np.arange(rank, nmesh, size),
@@ -171,7 +170,7 @@ def load_particles(
                 gc.collect()
 
                 ids = get_cell_idx(grid[0], grid[1], grid[2]).flatten()
-                del grid[0], grid[1], grid[2]
+                del grid
                 gc.collect()
 
                 mass = 1
@@ -195,9 +194,11 @@ def measure_basis_spectra(configs):
     if cv_surrogate:
         use_neutrinos = False
         basename = "mpi_icfields_nmesh_filt"
+        outname = "basis_spectra_za_surrogate"
     else:
         use_neutrinos = configs["use_neutrinos"]
         basename = "mpi_icfields_nmesh"
+        outname = "basis_spectra_nbody"        
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -322,14 +323,14 @@ def measure_basis_spectra(configs):
                     mmap_mode="r",
                 )
             else:
-                arr = h5py.File(lindir + "{}_{}".format(basename, nmesh), "r")[k]["3D"][
+                arr = h5py.File(lindir + "{}_{}.h5".format(basename, nmesh), "r")[keynames[k]]["3D"][
                     "2"
                 ]
 
             # Get weights
             w = arr[a_ic, b_ic, c_ic]
 
-            mpiprint(("w shapes", w.shape))
+            mpiprint(("w shapes", w.shape), rank)
 
             # distribute weights properly
             m = layout.exchange(w)
@@ -428,7 +429,7 @@ def measure_basis_spectra(configs):
     kpkvec = np.array(kpkvec)
     if rank == 0:
         np.savetxt(
-            componentdir + "lakelag_mpi_pk_a%.2f_nmesh%s.txt" % (1 / (zbox + 1), nmesh),
+            componentdir + "{}_pk_a{:.2f}_nmesh{}.txt".format(outname, 1 / (zbox + 1), nmesh),
             kpkvec,
         )
 
