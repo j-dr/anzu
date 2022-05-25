@@ -1,11 +1,17 @@
 from .common_functions import readGadgetSnapshot
-from nbodykit.algorithms.fftpower import FFTPower
 from classy import Class
 from mpi4py import MPI
 from glob import glob
 import numpy as np
 import time, sys, gc, psutil, os, yaml
 import pmesh, h5py
+
+try:
+    from nbodykit.algorithms.fftpower import FFTPower
+except Exception as e:
+    print(e)
+
+from pypower import MeshFFTPower
 
 
 def get_memory(rank):
@@ -83,6 +89,7 @@ def load_particles(
     lbox=None,
     boltz=None,
     z_ic=None,
+    rsd=False,
 ):
 
     if sim_type == "Gadget_hdf5":
@@ -102,6 +109,10 @@ def load_particles(
 
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)
+    f = boltz.scale_independent_growth_factor_f(z_this)
+    H_a = boltz.Hubble(z_this)
+    if rsd:
+        v_fac = (1 + z_this) ** 0.5 / H_a  # (v_p = v_gad * a^(1/2))
 
     pos = np.zeros((npart_this, 3))
     if parttype == 1:
@@ -120,6 +131,10 @@ def load_particles(
                 pos[npart_counter : npart_counter + npart_block] = block[
                     "PartType{}/Coordinates".format(parttype)
                 ]
+                if rsd:
+                    pos[:, 2] += (
+                        v_fac * block["PartType{}/Velocity".format(parttype)][:, 2]
+                    )
                 if parttype == 1:
                     ids[npart_counter : npart_counter + npart_block] = block[
                         "PartType{}/ParticleIDs".format(parttype)
@@ -133,12 +148,25 @@ def load_particles(
                             "Neutrino functionality not yet implemented for classic gadget outputs."
                         )
                     )
-                hdr, pos_i, ids_i = readGadgetSnapshot(
-                    snapfiles_this[i], read_id=True, read_pos=True
-                )
-                npart_block = hdr["npart"][1]
-                pos[npart_counter : npart_counter + npart_block] = pos_i
-                ids[npart_counter : npart_counter + npart_block] = ids_i
+                if rsd:
+                    hdr, pos_i, vel_i, ids_i = readGadgetSnapshot(
+                        snapfiles_this[i], read_id=True, read_pos=True, read_vel=True
+                    )
+                    npart_block = hdr["npart"][1]
+                    pos[npart_counter : npart_counter + npart_block] = pos_i
+                    pos[npart_counter : npart_counter + npart_block, 2] += (
+                        v_fac * vel_i[:, 2]
+                    )
+                    pos[npart_counter : npart_counter + npart_block, 2] %= lbox
+                    ids[npart_counter : npart_counter + npart_block] = ids_i
+                else:
+                    hdr, pos_i, ids_i = readGadgetSnapshot(
+                        snapfiles_this[i], read_id=True, read_pos=True
+                    )
+                    npart_block = hdr["npart"][1]
+                    pos[npart_counter : npart_counter + npart_block] = pos_i
+                    ids[npart_counter : npart_counter + npart_block] = ids_i
+
             else:
                 raise (ValueError("Sim type must be either Gadget or GadgetHDF5"))
 
@@ -164,6 +192,8 @@ def load_particles(
                 pos_z = (
                     (grid[2] / nmesh + D * ics["DM_dz_filt"][rank::size, ...]) % 1
                 ) * lbox
+                if rsd:
+                    pos_z += f * D * ics["DM_dz_filt"][rank::size, ...] * lbox
                 pos = np.stack([pos_x, pos_y, pos_z])
                 pos = pos.reshape(3, -1).T
                 del pos_x, pos_y, pos_z
@@ -181,7 +211,52 @@ def load_particles(
     return pos, ids, npart_this, z_this, mass, D
 
 
-def measure_basis_spectra(configs):
+def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
+
+    k_edges = np.linspace(0, nmesh * np.pi / lbox, int(nmesh // 2))
+    if not rsd:
+        edges = k_edges
+        poles = 0
+        mode = "1d"
+        Nmu = 1
+    else:
+        Nmu = 100
+        mu_edges = np.linspace(0, 1, Nmu)
+        edges = (k_edges, mu_edges)
+        poles = (0, 2, 4)
+        mode = "2d"
+
+    pkdict = {}
+
+    if use_pypower:
+        pk = MeshFFTPower(mesh1, mesh2=mesh2, edges=edges, los="z", poles=poles)
+
+        pkdict["k"] = pk.poles.k
+        pkdict["mu"] = pk.wedges.mu
+        pkdict["nmodes"] = pk.poles.nmodes
+        pkdict["nmodes_wedges"] = pk.wedges.nmodes
+        pkdict["power_poles"] = pk.poles.power.real * D1 * D2
+        pkdict["power_wedges"] = pk.wedges.power.real * D1 * D2
+
+    else:
+        pk = FFTPower(
+            mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, Nmu=Nmu, poles=poles
+        )
+
+        pkdict["k"] = pk.power["k"].real
+        pkdict["nmodes"] = pk.power["modes"].real
+        pkdict["power_wedges"] = pk.power["power"].real * D1 * D2
+
+        if rsd:
+            pkdict["mu"] = pk.power["mu"].real
+            pkdict["power_poles"] = np.stack(
+                [pk.poles["power_{}".format(ell)].real * D1 * D2 for ell in poles]
+            )
+
+    return pkdict
+
+
+def measure_basis_spectra(configs, field_dict2=None):
 
     lindir = configs["outdir"]
     nmesh = configs["nmesh_in"]
@@ -190,6 +265,9 @@ def measure_basis_spectra(configs):
     fdir = configs["particledir"]
     componentdir = configs["outdir"]
     cv_surrogate = configs["compute_cv_surrogate"]
+    use_pypower = configs.pop("use_pypower", False)
+    rsd = configs.pop("rsd", False)
+
     # don't use neutrinos for CV surrogate. cb field should be fine.
     if cv_surrogate:
         use_neutrinos = False
@@ -198,7 +276,7 @@ def measure_basis_spectra(configs):
     else:
         use_neutrinos = configs["use_neutrinos"]
         basename = "mpi_icfields_nmesh"
-        outname = "basis_spectra_nbody"        
+        outname = "basis_spectra_nbody"
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -222,7 +300,6 @@ def measure_basis_spectra(configs):
     pkclass = Class()
     pkclass.set(configs["Cosmology"])
     pkclass.compute()
-
     z_ic = configs["z_ic"]
 
     # Load in a subset of the total gadget snapshot.
@@ -237,7 +314,8 @@ def measure_basis_spectra(configs):
         boltz=pkclass,
         nmesh=configs["nmesh_in"],
         lbox=configs["lbox"],
-        z_ic=z_ic
+        z_ic=z_ic,
+        rsd=rsd,
     )
 
     # if use_neutrinos=True, compute an additional set of basis spectra,
@@ -245,8 +323,15 @@ def measure_basis_spectra(configs):
     # rather than the cb field. Separate this out to save memory.
     if use_neutrinos:
         posvec_nu, _, _, _, m_nu, _ = load_particles(
-            fdir, configs["sim_type"], rank, nranks, parttype=2,
-            boltz=pkclass, z_ic=z_ic
+            fdir,
+            configs["sim_type"],
+            rank,
+            nranks,
+            parttype=2,
+            boltz=pkclass,
+            z_ic=z_ic,
+            lbox=configs["lbox"],
+            rsd=rsd,
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
         del posvec_nu
@@ -324,13 +409,13 @@ def measure_basis_spectra(configs):
                 )
 
                 if cv_surrogate:
-                    w = arr[rank::nranks,...].flatten()
+                    w = arr[rank::nranks, ...].flatten()
                 else:
-                    w = arr[a_ic, b_ic, c_ic]                                        
+                    w = arr[a_ic, b_ic, c_ic]
             else:
-                arr = h5py.File(lindir + "{}_{}.h5".format(basename, nmesh), "r")[keynames[k]]["3D"][
-                    "2"
-                ]
+                arr = h5py.File(lindir + "{}_{}.h5".format(basename, nmesh), "r")[
+                    keynames[k]
+                ]["3D"]["2"]
                 w = arr[rank::nranks, ...].flatten()
 
             # distribute weights properly
@@ -338,7 +423,7 @@ def measure_basis_spectra(configs):
             del w
             gc.collect()
 
-#            get_memory(rank)
+            #            get_memory(rank)
 
             pm.paint(p, out=fieldlist[k], mass=m, resampler="cic")
             sys.stdout.flush()
@@ -354,7 +439,7 @@ def measure_basis_spectra(configs):
     if rank == 0:
         print("pasted")
         sys.stdout.flush()
-#    get_memory(rank)
+    #    get_memory(rank)
 
     # Normalize and mean-subtract the normal particle field.
     fieldlist[0] = fieldlist[0] / fieldlist[0].cmean() - 1
@@ -367,8 +452,7 @@ def measure_basis_spectra(configs):
             sys.stdout.flush()
         if configs["save_advected_fields"]:
             np.save(
-                componentdir
-                + "latetime_weight_%s_%s_rank%s" % (k, nmesh, rank),
+                componentdir + "latetime_weight_%s_%s_rank%s" % (k, nmesh, rank),
                 fieldlist[k].value,
             )
 
@@ -376,12 +460,10 @@ def measure_basis_spectra(configs):
             fieldlist[k] = fieldlist[k].r2c()
             fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
 
-#    get_memory(rank)
+    #    get_memory(rank)
     sys.stdout.flush()
-
     #######################################################################################################################
     #################################### Adjusting for growth #############################################################
-
     mpiprint(D, rank)
 
     if use_neutrinos:
@@ -409,31 +491,69 @@ def measure_basis_spectra(configs):
             if (i < j) | (use_neutrinos & (j == 0) & (i == 1)):
                 continue
             elif i >= j:
-                pk = FFTPower(
+
+                pkdict = measure_pk(
                     field_dict[labelvec[i]],
-                    "1d",
-                    second=field_dict[labelvec[j]],
-                    BoxSize=Lbox,
-                    Nmesh=nmesh,
+                    field_dict[labelvec[j]],
+                    Lbox,
+                    nmesh,
+                    rsd,
+                    use_pypower,
+                    field_D[i],
+                    field_D[j],
                 )
-
-                pkpower = pk.power["power"].real
-                if i == 0 and j == 0:
-                    kpkvec.append(pk.power["k"])
-
-                kpkvec.append(pkpower * field_D[i] * field_D[j])
-
+                kpkvec.append(pkdict)
                 pkcounter += 1
                 mpiprint(("pk done ", pkcounter), rank)
 
-    kpkvec = np.array(kpkvec)
     if rank == 0:
-        np.savetxt(
-            componentdir + "{}_pk_a{:.2f}_nmesh{}.txt".format(outname, 1 / (zbox + 1), nmesh),
+        np.save(
+            componentdir
+            + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.txt".format(
+                outname, rsd, use_pypower, 1 / (zbox + 1), nmesh
+            ),
             kpkvec,
         )
 
         print(time.time() - start_time)
+
+    # if we passed another field dict in to this function, cross correlate everything with everything
+    if field_dict2:
+        kpkvec = []
+        pkcounter = 0
+        if field_dict2 is not None:
+            labelvec2 = field_dict2.keys()
+
+            for i in range(len(labelvec)):
+                for j in range(len(labelvec2)):
+                    if i < j:
+                        continue
+
+                    pkdict = measure_pk(
+                        field_dict[labelvec[i]],
+                        field_dict2[labelvec2[j]],
+                        nmesh,
+                        rsd,
+                        use_pypower,
+                        field_D[i],
+                    )
+                    kpkvec.append(pkdict)
+                    pkcounter += 1
+                    mpiprint(("pk done ", pkcounter), rank)
+
+        kpkvec = np.array(kpkvec)
+        if rank == 0:
+            np.savetxt(
+                componentdir
+                + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.txt".format(
+                    outname + "_crosscorr", rsd, use_pypower, 1 / (zbox + 1), nmesh
+                ),
+                kpkvec,
+            )
+
+        print(time.time() - start_time)
+
+    return field_dict
 
 
 if __name__ == "__main__":
