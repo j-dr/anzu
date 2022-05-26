@@ -132,8 +132,8 @@ def load_particles(
                     "PartType{}/Coordinates".format(parttype)
                 ]
                 if rsd:
-                    pos[:, 2] += (
-                        v_fac * block["PartType{}/Velocity".format(parttype)][:, 2]
+                    pos[npart_counter : npart_counter + npart_block, 2] += (
+                        v_fac * block["PartType{}/Velocities".format(parttype)][:, 2]
                     )
                 if parttype == 1:
                     ids[npart_counter : npart_counter + npart_block] = block[
@@ -216,7 +216,7 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
     k_edges = np.linspace(0, nmesh * np.pi / lbox, int(nmesh // 2))
     if not rsd:
         edges = k_edges
-        poles = 0
+        poles = (0,)
         mode = "1d"
         Nmu = 1
     else:
@@ -256,7 +256,7 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
     return pkdict
 
 
-def measure_basis_spectra(configs, field_dict2=None):
+def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
 
     lindir = configs["outdir"]
     nmesh = configs["nmesh_in"]
@@ -509,7 +509,7 @@ def measure_basis_spectra(configs, field_dict2=None):
     if rank == 0:
         np.save(
             componentdir
-            + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.txt".format(
+            + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.npy".format(
                 outname, rsd, use_pypower, 1 / (zbox + 1), nmesh
             ),
             kpkvec,
@@ -522,30 +522,29 @@ def measure_basis_spectra(configs, field_dict2=None):
         kpkvec = []
         pkcounter = 0
         if field_dict2 is not None:
-            labelvec2 = field_dict2.keys()
+            labelvec2 = list(field_dict2.keys())
 
             for i in range(len(labelvec)):
                 for j in range(len(labelvec2)):
-                    if i < j:
-                        continue
 
                     pkdict = measure_pk(
                         field_dict[labelvec[i]],
                         field_dict2[labelvec2[j]],
+                        Lbox,
                         nmesh,
                         rsd,
                         use_pypower,
                         field_D[i],
+                        field_D2[j],                        
                     )
                     kpkvec.append(pkdict)
                     pkcounter += 1
                     mpiprint(("pk done ", pkcounter), rank)
 
-        kpkvec = np.array(kpkvec)
         if rank == 0:
-            np.savetxt(
+            np.save(
                 componentdir
-                + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.txt".format(
+                + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.npy".format(
                     outname + "_crosscorr", rsd, use_pypower, 1 / (zbox + 1), nmesh
                 ),
                 kpkvec,
@@ -553,7 +552,7 @@ def measure_basis_spectra(configs, field_dict2=None):
 
         print(time.time() - start_time)
 
-    return field_dict
+    return field_dict, field_D
 
 
 if __name__ == "__main__":

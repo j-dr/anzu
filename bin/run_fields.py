@@ -65,11 +65,11 @@ if __name__ == "__main__":
             print("Processing snapshot {}".format(i), flush=True)
 
         config["particledir"] = pdirs[i]
-        field_dict = measure_basis_spectra(config)
+        field_dict, D = measure_basis_spectra(config)
 
         if do_surrogates:
             config_surr["particledir"] = pdirs[i]
-            measure_basis_spectra(config_surr, field_dict2=field_dict)
+            measure_basis_spectra(config_surr, field_dict2=field_dict, field_D2=D)
 
     if do_rsd:
         config["rsd"] = True
@@ -80,8 +80,8 @@ if __name__ == "__main__":
             print("Processing snapshot {}".format(i), flush=True)
 
         config["particledir"] = pdirs[i]
-        field_dict = measure_basis_spectra(config)
+        field_dict, D = measure_basis_spectra(config)
 
         if do_surrogates:
             config_surr["particledir"] = pdirs[i]
-            measure_basis_spectra(config_surr, field_dict2=field_dict)
+            measure_basis_spectra(config_surr, field_dict2=field_dict, field_D2=D)
