@@ -229,7 +229,7 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
     pkdict = {}
 
     if use_pypower:
-        pk = MeshFFTPower(mesh1, mesh2=mesh2, edges=edges, los="z", poles=poles)
+        pk = MeshFFTPower(mesh1, mesh2=mesh2, edges=edges, los="z", ells=poles)
 
         pkdict["k"] = pk.poles.k
         pkdict["mu"] = pk.wedges.mu
@@ -265,8 +265,15 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
     fdir = configs["particledir"]
     componentdir = configs["outdir"]
     cv_surrogate = configs["compute_cv_surrogate"]
-    use_pypower = configs.pop("use_pypower", False)
-    rsd = configs.pop("rsd", False)
+    try:
+        use_pypower = configs["use_pypower"]
+    except:
+        use_pypower = False
+
+    try:
+        rsd = configs["rsd"]
+    except:
+        rsd = False
 
     # don't use neutrinos for CV surrogate. cb field should be fine.
     if cv_surrogate:
@@ -374,9 +381,11 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
     if (configs["sim_type"] == "FastPM") | (configs["ic_format"] == "monofonic"):
         idfac = 0
 
-    a_ic = ((idvec - idfac) // nmesh**2) % nmesh
-    b_ic = ((idvec - idfac) // nmesh) % nmesh
-    c_ic = (idvec - idfac) % nmesh
+    overload = 1<<configs['lattice_type']
+
+    a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh
+    b_ic = (((idvec - idfac) // overload) // nmesh) % nmesh
+    c_ic = ((idvec - idfac) // overload) % nmesh
 
     a_ic = a_ic.astype(int)
     b_ic = b_ic.astype(int)

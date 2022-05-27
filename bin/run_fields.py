@@ -18,6 +18,10 @@ if __name__ == "__main__":
     with open(config, "r") as fp:
         config = yaml.load(fp, Loader=Loader)
         globsnaps = config["globsnaps"]
+        snaplist = config.pop('snaplist', None)
+        skip_lagfields = config.pop('skip_lagfields', False) #if they've already been run
+        lattice_type = config.pop('lattice_type', 0) #0 for sc, 1 for bcc, 2 for fcc
+        config['lattice_type'] = lattice_type
 
     if globsnaps:
         snapdir = "/".join(config["particledir"].split("/")[:-1])
@@ -32,6 +36,11 @@ if __name__ == "__main__":
         pdirs = [
             snapdirs[i] + "/snapshot_{}".format(snapstrs[i]) for i in range(nsnaps)
         ]
+    elif snaplist:
+        this_snap = config['particledir'].split('snapdir_')[-1].split('/')[0]
+        pdirs = [config['particledir'].replace(this_snap, s) for s in snaplist]
+        nsnaps = len(pdirs)
+#        print(pdirs, flush=True)
     else:
         nsnaps = 1
         pdirs = [config["particledir"]]
@@ -52,10 +61,11 @@ if __name__ == "__main__":
     if rank == 0:
         print("Constructing lagrangian fields", flush=True)
 
-    make_lagfields(config)
+    if not skip_lagfields:
+        make_lagfields(config)
 
-    if do_surrogates:
-        make_lagfields(config_surr)
+        if do_surrogates:
+            make_lagfields(config_surr)
 
     if rank == 0:
         print("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
