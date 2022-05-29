@@ -110,9 +110,10 @@ def load_particles(
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)
     f = boltz.scale_independent_growth_factor_f(z_this)
-    H_a = boltz.Hubble(z_this)
+    Ha = boltz.Hubble(z_this) *  299792.458
+#    print('Ha={}'.format(H_a), flush=True)
     if rsd:
-        v_fac = (1 + z_this) ** 0.5 / H_a  # (v_p = v_gad * a^(1/2))
+        v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()# (v_p = v_gad * a^(1/2))
 
     pos = np.zeros((npart_this, 3))
     if parttype == 1:
@@ -135,6 +136,8 @@ def load_particles(
                     pos[npart_counter : npart_counter + npart_block, 2] += (
                         v_fac * block["PartType{}/Velocities".format(parttype)][:, 2]
                     )
+                    pos[npart_counter : npart_counter + npart_block, 2] %= lbox
+                    
                 if parttype == 1:
                     ids[npart_counter : npart_counter + npart_block] = block[
                         "PartType{}/ParticleIDs".format(parttype)
@@ -194,6 +197,7 @@ def load_particles(
                 ) * lbox
                 if rsd:
                     pos_z += f * D * ics["DM_dz_filt"][rank::size, ...] * lbox
+                    pos_z %= lbox
                 pos = np.stack([pos_x, pos_y, pos_z])
                 pos = pos.reshape(3, -1).T
                 del pos_x, pos_y, pos_z
