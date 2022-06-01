@@ -111,9 +111,10 @@ def load_particles(
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)
     f = boltz.scale_independent_growth_factor_f(z_this)
-    H_a = boltz.Hubble(z_this)
+    Ha = boltz.Hubble(z_this) *  299792.458
+#    print('Ha={}'.format(H_a), flush=True)
     if rsd:
-        v_fac = (1 + z_this) ** 0.5 / H_a  # (v_p = v_gad * a^(1/2))
+        v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()# (v_p = v_gad * a^(1/2))
 
     pos = np.zeros((npart_this, 3))
     if parttype == 1:
@@ -133,9 +134,11 @@ def load_particles(
                     "PartType{}/Coordinates".format(parttype)
                 ]
                 if rsd:
-                    pos[:, 2] += (
-                        v_fac * block["PartType{}/Velocity".format(parttype)][:, 2]
+                    pos[npart_counter : npart_counter + npart_block, 2] += (
+                        v_fac * block["PartType{}/Velocities".format(parttype)][:, 2]
                     )
+                    pos[npart_counter : npart_counter + npart_block, 2] %= lbox
+                    
                 if parttype == 1:
                     ids[npart_counter : npart_counter + npart_block] = block[
                         "PartType{}/ParticleIDs".format(parttype)
@@ -195,6 +198,7 @@ def load_particles(
                 ) * lbox
                 if rsd:
                     pos_z += f * D * ics["DM_dz_filt"][rank::size, ...] * lbox
+                    pos_z %= lbox
                 pos = np.stack([pos_x, pos_y, pos_z])
                 pos = pos.reshape(3, -1).T
                 del pos_x, pos_y, pos_z
@@ -217,7 +221,7 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
     k_edges = np.linspace(0, nmesh * np.pi / lbox, int(nmesh // 2))
     if not rsd:
         edges = k_edges
-        poles = 0
+        poles = (0,)
         mode = "1d"
         Nmu = 1
     else:
@@ -230,7 +234,7 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
     pkdict = {}
 
     if use_pypower:
-        pk = MeshFFTPower(mesh1, mesh2=mesh2, edges=edges, los="z", poles=poles)
+        pk = MeshFFTPower(mesh1, mesh2=mesh2, edges=edges, los="z", ells=poles)
 
         pkdict["k"] = pk.poles.k
         pkdict["mu"] = pk.wedges.mu
@@ -257,7 +261,7 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
     return pkdict
 
 
-def measure_basis_spectra(configs, field_dict2=None):
+def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
 
     lindir = configs["outdir"]
     nmesh = configs["nmesh_in"]
@@ -266,8 +270,15 @@ def measure_basis_spectra(configs, field_dict2=None):
     fdir = configs["particledir"]
     componentdir = configs["outdir"]
     cv_surrogate = configs["compute_cv_surrogate"]
-    use_pypower = configs.pop("use_pypower", False)
-    rsd = configs.pop("rsd", False)
+    try:
+        use_pypower = configs["use_pypower"]
+    except:
+        use_pypower = False
+
+    try:
+        rsd = configs["rsd"]
+    except:
+        rsd = False
 
     # don't use neutrinos for CV surrogate. cb field should be fine.
     if cv_surrogate:
@@ -375,9 +386,11 @@ def measure_basis_spectra(configs, field_dict2=None):
     if (configs["sim_type"] == "FastPM") | (configs["ic_format"] == "monofonic"):
         idfac = 0
 
-    a_ic = ((idvec - idfac) // nmesh**2) % nmesh
-    b_ic = ((idvec - idfac) // nmesh) % nmesh
-    c_ic = (idvec - idfac) % nmesh
+    overload = 1<<configs['lattice_type']
+
+    a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh
+    b_ic = (((idvec - idfac) // overload) // nmesh) % nmesh
+    c_ic = ((idvec - idfac) // overload) % nmesh
 
     a_ic = a_ic.astype(int)
     b_ic = b_ic.astype(int)
@@ -510,7 +523,7 @@ def measure_basis_spectra(configs, field_dict2=None):
     if rank == 0:
         np.save(
             componentdir
-            + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.txt".format(
+            + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.npy".format(
                 outname, rsd, use_pypower, 1 / (zbox + 1), nmesh
             ),
             kpkvec,
@@ -523,30 +536,29 @@ def measure_basis_spectra(configs, field_dict2=None):
         kpkvec = []
         pkcounter = 0
         if field_dict2 is not None:
-            labelvec2 = field_dict2.keys()
+            labelvec2 = list(field_dict2.keys())
 
             for i in range(len(labelvec)):
                 for j in range(len(labelvec2)):
-                    if i < j:
-                        continue
 
                     pkdict = measure_pk(
                         field_dict[labelvec[i]],
                         field_dict2[labelvec2[j]],
+                        Lbox,
                         nmesh,
                         rsd,
                         use_pypower,
                         field_D[i],
+                        field_D2[j],                        
                     )
                     kpkvec.append(pkdict)
                     pkcounter += 1
                     mpiprint(("pk done ", pkcounter), rank)
 
-        kpkvec = np.array(kpkvec)
         if rank == 0:
-            np.savetxt(
+            np.save(
                 componentdir
-                + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.txt".format(
+                + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.npy".format(
                     outname + "_crosscorr", rsd, use_pypower, 1 / (zbox + 1), nmesh
                 ),
                 kpkvec,
@@ -554,7 +566,7 @@ def measure_basis_spectra(configs, field_dict2=None):
 
         print(time.time() - start_time)
 
-    return field_dict
+    return field_dict, field_D
 
 
 if __name__ == "__main__":
