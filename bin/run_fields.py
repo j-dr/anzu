@@ -1,8 +1,7 @@
 import numpy as np
 import sys
-
-# sys.path.insert(0, '/global/cscratch1/sd/jderose/anzu/')
-# sys.path.insert(0, '/global/cscratch1/sd/jderose/anzu/fields/')
+sys.path.insert(0, '/ocean/projects/phy220011p/jderose/anzu/')
+sys.path.insert(0, '/ocean/projects/phy220011p/jderose/anzu/fields/')
 from fields.make_lagfields import make_lagfields
 from fields.measure_basis import measure_basis_spectra
 from mpi4py import MPI
