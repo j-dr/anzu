@@ -400,8 +400,8 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
     # Exchange positions
     p = layout.exchange(posvec)
 
-    mpiprint(("posvec shapes", posvec.shape), rank)
-    mpiprint(("idvec shapes", idvec.shape), rank)
+#    mpiprint(("posvec shapes", posvec.shape), rank)
+#    mpiprint(("idvec shapes", idvec.shape), rank)
     del posvec
     gc.collect()
 
@@ -409,8 +409,8 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
         if keynames[k] == "1m":
             continue  # already handled this above
 
-        if rank == 0:
-            print(k)
+#        if rank == 0:
+#            print(k)
         if keynames[k] == "1cb":
             pm.paint(p, out=fieldlist[k], mass=1, resampler="cic")
         else:
@@ -477,7 +477,7 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
     sys.stdout.flush()
     #######################################################################################################################
     #################################### Adjusting for growth #############################################################
-    mpiprint(D, rank)
+#    mpiprint(D, rank)
 
     if use_neutrinos:
         labelvec = [
@@ -517,18 +517,18 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
                 )
                 kpkvec.append(pkdict)
                 pkcounter += 1
-                mpiprint(("pk done ", pkcounter), rank)
+#                mpiprint(("pk done ", pkcounter), rank)
 
     if rank == 0:
         np.save(
             componentdir
-            + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.npy".format(
+            + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
                 outname, rsd, use_pypower, 1 / (zbox + 1), nmesh
             ),
             kpkvec,
         )
-
-        print(time.time() - start_time)
+        
+        print('measuring spectra took {}s'.format(time.time() - start_time))
 
     # if we passed another field dict in to this function, cross correlate everything with everything
     if field_dict2:
@@ -557,13 +557,12 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
         if rank == 0:
             np.save(
                 componentdir
-                + "{}_pk_rsd={}_pypower={}_a{:.2f}_nmesh{}.npy".format(
+                + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
                     outname + "_crosscorr", rsd, use_pypower, 1 / (zbox + 1), nmesh
                 ),
                 kpkvec,
             )
-
-        print(time.time() - start_time)
+            print('measuring cross spectra took {}s'.format(time.time() - start_time))
 
     return field_dict, field_D
 
