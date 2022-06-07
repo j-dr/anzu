@@ -72,7 +72,10 @@ def get_Nparts(snapfiles, sim_type, parttype):
             z_this = header["redshift"]
             mass = 1
 
-    return npart, z_this, mass
+    if npart == 0:
+        return npart, 0, 0
+    else:
+        return npart, z_this, mass
 
 
 def load_particles(
