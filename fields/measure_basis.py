@@ -92,7 +92,7 @@ def load_particles(
     lbox=None,
     boltz=None,
     z_ic=None,
-    rsd=False,
+    rsd=False
 ):
 
     if sim_type == "Gadget_hdf5":
@@ -315,6 +315,9 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
     pkclass.set(configs["Cosmology"])
     pkclass.compute()
     z_ic = configs["z_ic"]
+#    om = pkclass.pars['Omega_cdm'] + pkclass.pars['Omega_b'] + pkclass.pars['m_ncdm'] / 93.14 / pkclass.pars['h']**2
+#    on = pkclass.pars['m_ncdm'] / 93.14 / pkclass.pars['h']**2
+#    fnu = on / om
 
     # Load in a subset of the total gadget snapshot.
     posvec, idvec, npart_this, zbox, m_cb, D = load_particles(
@@ -329,7 +332,7 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
         nmesh=configs["nmesh_in"],
         lbox=configs["lbox"],
         z_ic=z_ic,
-        rsd=rsd,
+        rsd=rsd
     )
 
     # if use_neutrinos=True, compute an additional set of basis spectra,
@@ -345,7 +348,7 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
             boltz=pkclass,
             z_ic=z_ic,
             lbox=configs["lbox"],
-            rsd=rsd,
+            rsd=rsd
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
         del posvec_nu
