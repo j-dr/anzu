@@ -262,8 +262,69 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
 
     return pkdict
 
+def exchange(send_counts, send_offsets, recv_counts, recv_offsets,
+             data, comm):
+    
+    newlength = recv_counts.sum()
+    
+    duplicity = np.product(np.array(data.shape[1:], 'intp')) 
+    itemsize = duplicity * data.dtype.itemsize
 
-def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
+    dt = MPI.BYTE.Create_contiguous(itemsize)
+    dt.Commit()
+    dtype = np.dtype((data.dtype, data.shape[1:]))
+    recvbuffer = np.empty(newlength, dtype=dtype, order='C')
+    
+    _ = comm.Alltoallv((data, (send_counts, send_offsets), dt), 
+                        (recvbuffer, (recv_counts, recv_offsets), dt))
+    dt.Free()
+    comm.Barrier()
+    
+    return recvbuffer
+    
+def send_parts_to_weights(idvec, posvec, nmesh, comm):
+    nranks = comm.size
+    
+    idfac = 1
+    if (configs["sim_type"] == "FastPM") | (configs["ic_format"] == "monofonic"):
+        idfac = 0
+
+    overload = 1<<configs['lattice_type']    
+
+    #determine what rank each particles weight is on
+    a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh
+    a_ic = a_ic.astype(int)
+    
+    
+    slabs_per_rank = nmesh // nranks 
+    send_rank = a_ic // slabs_per_rank
+    
+    #presort before communication
+    idx = np.argsort(send_rank)
+    posvec = posvec.take(idx, axis=0)
+    idvec = idvec.take(idx, axis=0)
+    send_rank = send_rank[idx] 
+    
+    #figure out how many things we're sending where
+    send_counts, _ = np.histogram(send_rank+1, np.arange(nranks+1))
+    recv_counts = np.zeros_like(send_counts)
+    comm.Alltoall(send_counts, recv_counts)
+    send_offsets = np.zeros_like(send_counts)
+    recv_offsets = np.zeros_like(recv_counts)
+    send_offsets[1:] = send_counts.cumsum()[:-1]
+    recv_offsets[1:] = recv_counts.cumsum()[:-1]
+  
+    #send
+    posvec = exchange(send_counts, send_offsets, recv_counts,
+                        recv_offsets, posvec, comm)
+    
+    idvec = exchange(send_counts, send_offsets, recv_counts,
+                        recv_offsets, idvec, comm)
+    
+    return posvec, idvec
+
+def measure_basis_spectra(configs, lag_fields,
+                          field_dict2=None, field_D2=None):
 
     lindir = configs["outdir"]
     nmesh = configs["nmesh_in"]
@@ -387,27 +448,21 @@ def measure_basis_spectra(configs, field_dict2=None, field_D2=None):
     # Gadget has IDs starting with ID=1.
     # FastPM has ID=0
     # idfac decides which one to use
+    posvec, idvec = send_parts_to_weights(idvec, posvec, nmesh, comm)
+    
     idfac = 1
     if (configs["sim_type"] == "FastPM") | (configs["ic_format"] == "monofonic"):
         idfac = 0
 
-    overload = 1<<configs['lattice_type']
-
-    a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh
+    overload = 1<<configs['lattice_type']    
+    a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh % (rank * nmesh // nranks)
     b_ic = (((idvec - idfac) // overload) // nmesh) % nmesh
-    c_ic = ((idvec - idfac) // overload) % nmesh
-
-    a_ic = a_ic.astype(int)
-    b_ic = b_ic.astype(int)
-    c_ic = c_ic.astype(int)
+    c_ic = ((idvec - idfac) // overload) % nmesh    
+    
     # Figure out where each particle position is going to be distributed among mpi ranks
     layout = pm.decompose(posvec)
-
-    # Exchange positions
     p = layout.exchange(posvec)
 
-#    mpiprint(("posvec shapes", posvec.shape), rank)
-#    mpiprint(("idvec shapes", idvec.shape), rank)
     del posvec
     gc.collect()
 
