@@ -92,7 +92,7 @@ def load_particles(
     lbox=None,
     boltz=None,
     z_ic=None,
-    rsd=False
+    rsd=False,
 ):
 
     if sim_type == "Gadget_hdf5":
@@ -113,10 +113,10 @@ def load_particles(
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)
     f = boltz.scale_independent_growth_factor_f(z_this)
-    Ha = boltz.Hubble(z_this) *  299792.458
-#    print('Ha={}'.format(H_a), flush=True)
+    Ha = boltz.Hubble(z_this) * 299792.458
+    #    print('Ha={}'.format(H_a), flush=True)
     if rsd:
-        v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()# (v_p = v_gad * a^(1/2))
+        v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()  # (v_p = v_gad * a^(1/2))
 
     pos = np.zeros((npart_this, 3))
     if parttype == 1:
@@ -140,7 +140,7 @@ def load_particles(
                         v_fac * block["PartType{}/Velocities".format(parttype)][:, 2]
                     )
                     pos[npart_counter : npart_counter + npart_block, 2] %= lbox
-                    
+
                 if parttype == 1:
                     ids[npart_counter : npart_counter + npart_block] = block[
                         "PartType{}/ParticleIDs".format(parttype)
@@ -262,69 +262,73 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
 
     return pkdict
 
-def exchange(send_counts, send_offsets, recv_counts, recv_offsets,
-             data, comm):
-    
+
+def exchange(send_counts, send_offsets, recv_counts, recv_offsets, data, comm):
+
     newlength = recv_counts.sum()
-    
-    duplicity = np.product(np.array(data.shape[1:], 'intp')) 
+
+    duplicity = np.product(np.array(data.shape[1:], "intp"))
     itemsize = duplicity * data.dtype.itemsize
 
     dt = MPI.BYTE.Create_contiguous(itemsize)
     dt.Commit()
     dtype = np.dtype((data.dtype, data.shape[1:]))
-    recvbuffer = np.empty(newlength, dtype=dtype, order='C')
-    
-    _ = comm.Alltoallv((data, (send_counts, send_offsets), dt), 
-                        (recvbuffer, (recv_counts, recv_offsets), dt))
+    recvbuffer = np.empty(newlength, dtype=dtype, order="C")
+
+    _ = comm.Alltoallv(
+        (data, (send_counts, send_offsets), dt),
+        (recvbuffer, (recv_counts, recv_offsets), dt),
+    )
     dt.Free()
     comm.Barrier()
-    
+
     return recvbuffer
-    
+
+
 def send_parts_to_weights(idvec, posvec, nmesh, comm):
     nranks = comm.size
-    
+
     idfac = 1
     if (configs["sim_type"] == "FastPM") | (configs["ic_format"] == "monofonic"):
         idfac = 0
 
-    overload = 1<<configs['lattice_type']    
+    overload = 1 << configs["lattice_type"]
 
-    #determine what rank each particles weight is on
-    a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh
+    # determine what rank each particles weight is on
+    a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh
     a_ic = a_ic.astype(int)
-    
-    
-    slabs_per_rank = nmesh // nranks 
+
+    slabs_per_rank = nmesh // nranks
     send_rank = a_ic // slabs_per_rank
-    
-    #presort before communication
+
+    # presort before communication
     idx = np.argsort(send_rank)
     posvec = posvec.take(idx, axis=0)
     idvec = idvec.take(idx, axis=0)
-    send_rank = send_rank[idx] 
-    
-    #figure out how many things we're sending where
-    send_counts, _ = np.histogram(send_rank+1, np.arange(nranks+1))
+    send_rank = send_rank[idx]
+
+    # figure out how many things we're sending where
+    send_counts, _ = np.histogram(send_rank + 1, np.arange(nranks + 1))
     recv_counts = np.zeros_like(send_counts)
     comm.Alltoall(send_counts, recv_counts)
     send_offsets = np.zeros_like(send_counts)
     recv_offsets = np.zeros_like(recv_counts)
     send_offsets[1:] = send_counts.cumsum()[:-1]
     recv_offsets[1:] = recv_counts.cumsum()[:-1]
-  
-    #send
-    posvec = exchange(send_counts, send_offsets, recv_counts,
-                        recv_offsets, posvec, comm)
-    
-    idvec = exchange(send_counts, send_offsets, recv_counts,
-                        recv_offsets, idvec, comm)
-    
+
+    # send
+    posvec = exchange(
+        send_counts, send_offsets, recv_counts, recv_offsets, posvec, comm
+    )
+
+    idvec = exchange(send_counts, send_offsets, recv_counts, recv_offsets, idvec, comm)
+
     return posvec, idvec
 
-def measure_basis_spectra(configs, lag_fields,
-                          field_dict2=None, field_D2=None):
+
+def measure_basis_spectra(
+    configs, lag_field_dict=None, field_dict2=None, field_D2=None
+):
 
     lindir = configs["outdir"]
     nmesh = configs["nmesh_in"]
@@ -376,9 +380,6 @@ def measure_basis_spectra(configs, lag_fields,
     pkclass.set(configs["Cosmology"])
     pkclass.compute()
     z_ic = configs["z_ic"]
-#    om = pkclass.pars['Omega_cdm'] + pkclass.pars['Omega_b'] + pkclass.pars['m_ncdm'] / 93.14 / pkclass.pars['h']**2
-#    on = pkclass.pars['m_ncdm'] / 93.14 / pkclass.pars['h']**2
-#    fnu = on / om
 
     # Load in a subset of the total gadget snapshot.
     posvec, idvec, npart_this, zbox, m_cb, D = load_particles(
@@ -393,7 +394,7 @@ def measure_basis_spectra(configs, lag_fields,
         nmesh=configs["nmesh_in"],
         lbox=configs["lbox"],
         z_ic=z_ic,
-        rsd=rsd
+        rsd=rsd,
     )
 
     # if use_neutrinos=True, compute an additional set of basis spectra,
@@ -409,7 +410,7 @@ def measure_basis_spectra(configs, lag_fields,
             boltz=pkclass,
             z_ic=z_ic,
             lbox=configs["lbox"],
-            rsd=rsd
+            rsd=rsd,
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
         del posvec_nu
@@ -448,20 +449,35 @@ def measure_basis_spectra(configs, lag_fields,
     # Gadget has IDs starting with ID=1.
     # FastPM has ID=0
     # idfac decides which one to use
-    posvec, idvec = send_parts_to_weights(idvec, posvec, nmesh, comm)
-    
     idfac = 1
     if (configs["sim_type"] == "FastPM") | (configs["ic_format"] == "monofonic"):
         idfac = 0
+    overload = 1 << configs["lattice_type"]
 
-    overload = 1<<configs['lattice_type']    
-    a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh % (rank * nmesh // nranks)
+    if lag_field_dict:
+        posvec, idvec = send_parts_to_weights(idvec, posvec, nmesh, comm)
+        a_ic = (
+            (((idvec - idfac) // overload) // nmesh ** 2)
+            % nmesh
+            % (rank * nmesh // nranks)
+        )
+    else:
+        a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh
+
     b_ic = (((idvec - idfac) // overload) // nmesh) % nmesh
-    c_ic = ((idvec - idfac) // overload) % nmesh    
-    
+    c_ic = ((idvec - idfac) // overload) % nmesh
+
+    del idvec
+    gc.collect()
+
     # Figure out where each particle position is going to be distributed among mpi ranks
     layout = pm.decompose(posvec)
     p = layout.exchange(posvec)
+
+    if lag_field_dict:
+        lag_field_dict = {}
+        for k in lag_field_dict:
+            lag_field_dict[k] = layout.exchange(lag_field_dict[k][a_ic, b_ic, c_ic])
 
     del posvec
     gc.collect()
@@ -470,13 +486,16 @@ def measure_basis_spectra(configs, lag_fields,
         if keynames[k] == "1m":
             continue  # already handled this above
 
-#        if rank == 0:
-#            print(k)
+        #        if rank == 0:
+        #            print(k)
         if keynames[k] == "1cb":
             pm.paint(p, out=fieldlist[k], mass=1, resampler="cic")
         else:
+
+            if lag_field_dict:
+                m = lag_field_dict[keynames[k]]
             # Now load specific compfield. 1,2,3 is delta, delta^2, s^2
-            if configs["np_weightfields"]:
+            elif configs["np_weightfields"]:
                 arr = np.load(
                     lindir + "{}_{}_{}_np.npy".format(basename, nmesh, keynames[k]),
                     mmap_mode="r",
@@ -486,15 +505,18 @@ def measure_basis_spectra(configs, lag_fields,
                     w = arr[rank::nranks, ...].flatten()
                 else:
                     w = arr[a_ic, b_ic, c_ic]
+
+                m = layout.exchange(w)
+                del w
             else:
                 arr = h5py.File(lindir + "{}_{}.h5".format(basename, nmesh), "r")[
                     keynames[k]
                 ]["3D"]["2"]
                 w = arr[rank::nranks, ...].flatten()
 
-            # distribute weights properly
-            m = layout.exchange(w)
-            del w
+                # distribute weights properly
+                m = layout.exchange(w)
+                del w
             gc.collect()
 
             #            get_memory(rank)
@@ -538,7 +560,7 @@ def measure_basis_spectra(configs, lag_fields,
     sys.stdout.flush()
     #######################################################################################################################
     #################################### Adjusting for growth #############################################################
-#    mpiprint(D, rank)
+    #    mpiprint(D, rank)
 
     if use_neutrinos:
         labelvec = [
@@ -549,10 +571,14 @@ def measure_basis_spectra(configs, lag_fields,
             r"$s^2$",
             r"$\nabla^2\delta$",
         ]
-        field_D = [1, 1, D, D**2, D**2, D]
+        if configs["scale_dependent_growth"]:
+            field_D = [1, 1, 1, 1, 1, 1]
+        else:
+            field_D = [1, 1, D, D ** 2, D ** 2, D]
+
     else:
         labelvec = ["1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
-        field_D = [1, D, D**2, D**2, D]
+        field_D = [1, D, D ** 2, D ** 2, D]
 
     field_dict = dict(zip(labelvec, fieldlist))
 
@@ -578,7 +604,7 @@ def measure_basis_spectra(configs, lag_fields,
                 )
                 kpkvec.append(pkdict)
                 pkcounter += 1
-#                mpiprint(("pk done ", pkcounter), rank)
+    #                mpiprint(("pk done ", pkcounter), rank)
 
     if rank == 0:
         np.save(
@@ -588,8 +614,8 @@ def measure_basis_spectra(configs, lag_fields,
             ),
             kpkvec,
         )
-        
-        print('measuring spectra took {}s'.format(time.time() - start_time))
+
+        print("measuring spectra took {}s".format(time.time() - start_time))
 
     # if we passed another field dict in to this function, cross correlate everything with everything
     if field_dict2:
@@ -609,7 +635,7 @@ def measure_basis_spectra(configs, lag_fields,
                         rsd,
                         use_pypower,
                         field_D[i],
-                        field_D2[j],                        
+                        field_D2[j],
                     )
                     kpkvec.append(pkdict)
                     pkcounter += 1
@@ -623,7 +649,7 @@ def measure_basis_spectra(configs, lag_fields,
                 ),
                 kpkvec,
             )
-            print('measuring cross spectra took {}s'.format(time.time() - start_time))
+            print("measuring cross spectra took {}s".format(time.time() - start_time))
 
     return field_dict, field_D
 

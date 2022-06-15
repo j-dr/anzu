@@ -176,7 +176,7 @@ def gaussian_filter(field, nmesh, lbox, rank, nranks, fft, kcut):
 
 
 def compute_transfer_function(configs, z, k_in, p_in):
-    
+
     pkclass = Class()
     pkclass.set(configs["Cosmology"])
     pkclass.compute()
@@ -193,7 +193,7 @@ def compute_transfer_function(configs, z, k_in, p_in):
 
 def apply_transfer_function(field, nmesh, lbox, rank, nranks, fft, k_t, transfer):
 
-    transfer_interp = interp1d(k_t, transfer, kind="cubic", fill_value='extrapolate')
+    transfer_interp = interp1d(k_t, transfer, kind="cubic", fill_value="extrapolate")
 
     fhat = fft.forward(field, normalize=True)
     kvals = np.fft.fftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
@@ -215,7 +215,7 @@ def apply_scale_dependent_growth(field, nmesh, lbox, rank, nranks, fft, configs,
 
     pk_in = np.genfromtxt(configs["p_lin_ic_file"])
     k_in = pk_in[:, 0]
-    p_in = pk_in[:, 1] * (2 * np.pi)**3
+    p_in = pk_in[:, 1] * (2 * np.pi) ** 3
 
     transfer, p_cb_lin = compute_transfer_function(configs, z, k_in, p_in)
 
@@ -398,8 +398,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
         v.write(outdir + "{}_{}.h5".format(basename, nmesh), "tidesq", step=2)
 
     # clear up space yet again
-#    del v, tinyfft, vmean
-#    gc.collect()
+    #    del v, tinyfft, vmean
+    #    gc.collect()
 
     # Now make the nablasq field
     ns = newDistArray(fft, False)
@@ -411,8 +411,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
     if save_to_disk:
         v.write(outdir + "{}_{}.h5".format(basename, nmesh), "nablasq", step=2)
     # Moar space
-    #del u, bigmesh, deltak, u_hat, fft, v
-    #gc.collect()
+    # del u, bigmesh, deltak, u_hat, fft, v
+    # gc.collect()
 
     if configs["np_weightfields"]:
 
@@ -436,9 +436,11 @@ def make_lagfields(configs, save_to_disk=False, z=None):
     else:
         if rank == 0:
             print("Wrote successfully! Took %d seconds" % (time.time() - start_time))
-            
-            
-    return u, d2, v, ns
+
+    fieldnames = ["delta", "deltasq", "tidesq", "nablasq"]
+    lag_field_dict = dict(zip(fieldnames, [u, d2, v, ns]))
+
+    return lag_field_dict
 
 
 if __name__ == "__main__":
