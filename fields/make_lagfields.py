@@ -60,9 +60,6 @@ def delta_to_tidesq(delta_k, nmesh, lbox, rank, nranks, fft):
     kvalsr = np.fft.rfftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
 
     kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
-    if rank == 0:
-        print(kvals.shape, kvalsmpi.shape, kvalsr.shape, "shape of x, y, z")
-
     knorm = kx ** 2 + ky ** 2 + kz ** 2
     if knorm[0][0][0] == 0:
         knorm[0][0][0] = 1
@@ -125,8 +122,6 @@ def delta_to_gradsqdelta(delta_k, nmesh, lbox, rank, nranks, fft):
     kvalsr = np.fft.rfftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
 
     kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
-    if rank == 0:
-        print(kvals.shape, kvalsmpi.shape, kvalsr.shape, "shape of x, y, z")
 
     knorm = kx ** 2 + ky ** 2 + kz ** 2
     if knorm[0][0][0] == 0:
@@ -194,7 +189,7 @@ def compute_transfer_function(configs, z, k_in, p_in):
 def apply_transfer_function(field, nmesh, lbox, rank, nranks, fft, k_t, transfer):
 
     transfer_interp = interp1d(k_t, transfer, kind="cubic", fill_value="extrapolate")
-
+        
     fhat = fft.forward(field, normalize=True)
     kvals = np.fft.fftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
     kvalsmpi = kvals[rank * nmesh // nranks : (rank + 1) * nmesh // nranks]
@@ -281,8 +276,13 @@ def make_lagfields(configs, save_to_disk=False, z=None):
 
     if scale_dependent_growth:
         assert z is not None
+        if rank==0:
+            print('Applying scale dependent growth transfer function', flush=True)
         u = apply_scale_dependent_growth(u, nmesh, Lbox, rank, nranks, fft, configs, z)
+        d = newDistArray(fft, False)
+        d[:] = u
 
+        
     if compute_cv_surrogate:
         u_filt = gaussian_filter(u, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
         del u
@@ -347,14 +347,13 @@ def make_lagfields(configs, save_to_disk=False, z=None):
             ] = p_z_filt[:]
             del p_z_filt
 
-        if rank == 0:
-            print("done filtering", flush=True)
-
         u = newDistArray(fft, False)
         with h5py.File(lindir, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
             u[:] = ics["DM_delta_filt"][
                 rank * nmesh // nranks : (rank + 1) * nmesh // nranks, :, :
             ]
+    else:
+        ics.close()
 
     # Compute the delta^2 field. This operation is local in real space.
     d2 = newDistArray(fft, False)
@@ -369,20 +368,12 @@ def make_lagfields(configs, save_to_disk=False, z=None):
     # Parallel-write delta^2 to hdf5 file
     if save_to_disk:
         d2.write(outdir + "{}_{}.h5".format(basename, nmesh), "deltasq", step=2)
-        u.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta", step=2)
+        d.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta", step=2)
 
-    # Take a forward FFT of the linear density
     u_hat = fft.forward(u, normalize=True)
-    if rank == 0:
-        print("Did backwards FFT")
-
-    # Make a copy of FFT'd linear density. Will be used to make s^2 field.
     deltak = u_hat.copy()
-    if rank == 0:
-        print("Did array copy")
+
     tinyfft = delta_to_tidesq(deltak, nmesh, Lbox, rank, nranks, fft)
-    if rank == 0:
-        print("Made the tidesq field")
 
     # Populate output with distarray
     v = newDistArray(fft, False)
@@ -403,42 +394,37 @@ def make_lagfields(configs, save_to_disk=False, z=None):
 
     # Now make the nablasq field
     ns = newDistArray(fft, False)
-
     nablasq = delta_to_gradsqdelta(deltak, nmesh, Lbox, rank, nranks, fft)
-
     ns[:] = nablasq
 
     if save_to_disk:
-        v.write(outdir + "{}_{}.h5".format(basename, nmesh), "nablasq", step=2)
+        ns.write(outdir + "{}_{}.h5".format(basename, nmesh), "nablasq", step=2)
     # Moar space
     # del u, bigmesh, deltak, u_hat, fft, v
     # gc.collect()
-
-    if configs["np_weightfields"]:
+    
+    if save_to_disk & configs["np_weightfields"]:
 
         if rank == 0:
 
             print("Wrote successfully! Now must convert to .npy files")
             print(time.time() - start_time, " seconds!")
             get_memory()
-            f = h5py.File(outdir + "{}_{}.h5".format(basename, nmesh), "r")
-            fkeys = list(f.keys())
-            for key in fkeys:
-                arr = f[key]["3D"]["2"]
-                print("converting " + key + " to numpy array")
-                np.save(outdir + "{}_{}_{}_np".format(basename, nmesh, key), arr)
-                print(time.time() - start_time, " seconds!")
-                del arr
-                gc.collect()
-                get_memory()
+            with h5py.File(outdir + "{}_{}.h5".format(basename, nmesh), "r") as f:
+                fkeys = list(f.keys())
+                for key in fkeys:
+                    arr = f[key]["3D"]["2"]
+                    print("converting " + key + " to numpy array")
+                    np.save(outdir + "{}_{}_{}_np".format(basename, nmesh, key), arr)
+                    print(time.time() - start_time, " seconds!")
+                    del arr
+                    gc.collect()
+                    get_memory()
             # Deletes the hdf5 file
             os.system("rm " + outdir + "{}_{}.h5".format(basename, nmesh))
-    else:
-        if rank == 0:
-            print("Wrote successfully! Took %d seconds" % (time.time() - start_time))
 
     fieldnames = ["delta", "deltasq", "tidesq", "nablasq"]
-    lag_field_dict = dict(zip(fieldnames, [u, d2, v, ns]))
+    lag_field_dict = dict(zip(fieldnames, [d, d2, v, ns]))
 
     return lag_field_dict
 

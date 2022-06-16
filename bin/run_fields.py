@@ -1,17 +1,17 @@
 import numpy as np
 import sys, os
-
-# sys.path.insert(0, '/pscratch/sd/j/jderose/anzu/')
-# os.environ['LD_LIBRARY_PATH'] = os.environ['LD_LIBRARY_PATH'] + ':/opt/test'
+sys.path.insert(0, '/pscratch/sd/j/jderose/anzu/')
+sys.path.insert(0, '/pscratch/sd/j/jderose/anzu/fields/')
 from fields.make_lagfields import make_lagfields
 from fields.measure_basis import measure_basis_spectra
-from .common_functions import readGadgetSnapshot
+from fields.common_functions import readGadgetSnapshot
 from mpi4py import MPI
 from copy import copy
 from glob import glob
 from yaml import Loader
 import sys, yaml
 import h5py
+import gc
 
 
 def get_snap_z(basedir, sim_type):
@@ -106,10 +106,17 @@ if __name__ == "__main__":
         print("Constructing z_ic lagrangian fields", flush=True)
 
     if not skip_lagfields:
-        make_lagfields(config)
-
+        #just use d_lin from IC code here
+        config['scale_dependent_growth'] = False
+        out = make_lagfields(config, save_to_disk=True)
+        del out
+        gc.collect()
+        config['scale_dependent_growth'] = scale_dependent_growth
+        
         if do_surrogates:
-            make_lagfields(config_surr)
+            out = make_lagfields(config_surr, save_to_disk=True)
+            del out
+            gc.collect()
 
     if rank == 0:
         print("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
@@ -131,6 +138,7 @@ if __name__ == "__main__":
                 lag_field_dict = None
 
             field_dict, D = measure_basis_spectra(config, lag_field_dict)
+#            field_dict, D = measure_basis_spectra(config, None)
 
             if do_surrogates:
                 config_surr["particledir"] = pdirs[i]

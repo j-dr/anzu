@@ -114,7 +114,7 @@ def load_particles(
     D = D / boltz.scale_independent_growth_factor(z_ic)
     f = boltz.scale_independent_growth_factor_f(z_this)
     Ha = boltz.Hubble(z_this) * 299792.458
-    #    print('Ha={}'.format(H_a), flush=True)
+
     if rsd:
         v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()  # (v_p = v_gad * a^(1/2))
 
@@ -285,15 +285,9 @@ def exchange(send_counts, send_offsets, recv_counts, recv_offsets, data, comm):
     return recvbuffer
 
 
-def send_parts_to_weights(idvec, posvec, nmesh, comm):
+def send_parts_to_weights(idvec, posvec, nmesh, comm, idfac, overload):
+
     nranks = comm.size
-
-    idfac = 1
-    if (configs["sim_type"] == "FastPM") | (configs["ic_format"] == "monofonic"):
-        idfac = 0
-
-    overload = 1 << configs["lattice_type"]
-
     # determine what rank each particles weight is on
     a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh
     a_ic = a_ic.astype(int)
@@ -308,7 +302,8 @@ def send_parts_to_weights(idvec, posvec, nmesh, comm):
     send_rank = send_rank[idx]
 
     # figure out how many things we're sending where
-    send_counts, _ = np.histogram(send_rank + 1, np.arange(nranks + 1))
+#    send_counts, _ = np.histogram(send_rank + 1, np.arange(nranks + 1))
+    send_counts = np.bincount(send_rank, minlength=nranks)
     recv_counts = np.zeros_like(send_counts)
     comm.Alltoall(send_counts, recv_counts)
     send_offsets = np.zeros_like(send_counts)
@@ -373,7 +368,6 @@ def measure_basis_spectra(
 
     if rank == 0:
         get_memory(rank)
-        print("starting loop")
         sys.stdout.flush()
 
     pkclass = Class()
@@ -428,7 +422,6 @@ def measure_basis_spectra(
         w = layout.exchange(m)
         del m
         gc.collect()
-
         pm.paint(p, out=fieldlist[-1], mass=w, resampler="cic")
 
     else:
@@ -455,11 +448,11 @@ def measure_basis_spectra(
     overload = 1 << configs["lattice_type"]
 
     if lag_field_dict:
-        posvec, idvec = send_parts_to_weights(idvec, posvec, nmesh, comm)
+        posvec, idvec = send_parts_to_weights(idvec, posvec, nmesh, comm, idfac, overload)
         a_ic = (
             (((idvec - idfac) // overload) // nmesh ** 2)
             % nmesh
-            % (rank * nmesh // nranks)
+            % (nmesh // nranks)
         )
     else:
         a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh
@@ -475,26 +468,28 @@ def measure_basis_spectra(
     p = layout.exchange(posvec)
 
     if lag_field_dict:
-        lag_field_dict = {}
-        for k in lag_field_dict:
-            lag_field_dict[k] = layout.exchange(lag_field_dict[k][a_ic, b_ic, c_ic])
-
+        kdict = lag_field_dict.keys()        
+        lag_field_dict_new = {}
+        for k in kdict:
+            lag_field_dict_new[k] = layout.exchange(lag_field_dict[k][a_ic, b_ic, c_ic])
+        del lag_field_dict
+        lag_field_dict = lag_field_dict_new
+        
     del posvec
     gc.collect()
+    
 
     for k in range(len(fieldlist)):
         if keynames[k] == "1m":
             continue  # already handled this above
 
-        #        if rank == 0:
-        #            print(k)
         if keynames[k] == "1cb":
             pm.paint(p, out=fieldlist[k], mass=1, resampler="cic")
         else:
 
             if lag_field_dict:
                 m = lag_field_dict[keynames[k]]
-            # Now load specific compfield. 1,2,3 is delta, delta^2, s^2
+
             elif configs["np_weightfields"]:
                 arr = np.load(
                     lindir + "{}_{}_{}_np.npy".format(basename, nmesh, keynames[k]),
@@ -519,8 +514,6 @@ def measure_basis_spectra(
                 del w
             gc.collect()
 
-            #            get_memory(rank)
-
             pm.paint(p, out=fieldlist[k], mass=m, resampler="cic")
             sys.stdout.flush()
             del m
@@ -528,14 +521,8 @@ def measure_basis_spectra(
 
         sys.stdout.flush()
 
-    if rank == 0:
-        print(fieldlist[0].shape)
     del p
     gc.collect()
-    if rank == 0:
-        print("pasted")
-        sys.stdout.flush()
-    #    get_memory(rank)
 
     # Normalize and mean-subtract the normal particle field.
     fieldlist[0] = fieldlist[0] / fieldlist[0].cmean() - 1
@@ -544,7 +531,6 @@ def measure_basis_spectra(
 
     for k in range(len(fieldlist)):
         if rank == 0:
-            print(np.mean(fieldlist[k].value), np.std(fieldlist[k].value))
             sys.stdout.flush()
         if configs["save_advected_fields"]:
             np.save(
@@ -556,11 +542,9 @@ def measure_basis_spectra(
             fieldlist[k] = fieldlist[k].r2c()
             fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
 
-    #    get_memory(rank)
     sys.stdout.flush()
     #######################################################################################################################
     #################################### Adjusting for growth #############################################################
-    #    mpiprint(D, rank)
 
     if use_neutrinos:
         labelvec = [
@@ -571,15 +555,15 @@ def measure_basis_spectra(
             r"$s^2$",
             r"$\nabla^2\delta$",
         ]
-        if configs["scale_dependent_growth"]:
-            field_D = [1, 1, 1, 1, 1, 1]
-        else:
-            field_D = [1, 1, D, D ** 2, D ** 2, D]
+        field_D = [1, 1, D, D ** 2, D ** 2, D]
 
     else:
         labelvec = ["1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
         field_D = [1, D, D ** 2, D ** 2, D]
 
+    if configs["scale_dependent_growth"]:
+        field_D = [1, 1, 1, 1, 1, 1]
+        
     field_dict = dict(zip(labelvec, fieldlist))
 
     #######################################################################################################################
@@ -604,7 +588,7 @@ def measure_basis_spectra(
                 )
                 kpkvec.append(pkdict)
                 pkcounter += 1
-    #                mpiprint(("pk done ", pkcounter), rank)
+                mpiprint(("pk done ", pkcounter), rank)
 
     if rank == 0:
         np.save(
