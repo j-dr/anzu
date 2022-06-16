@@ -1,7 +1,5 @@
 import numpy as np
 import sys, os
-sys.path.insert(0, '/pscratch/sd/j/jderose/anzu/')
-sys.path.insert(0, '/pscratch/sd/j/jderose/anzu/fields/')
 from fields.make_lagfields import make_lagfields
 from fields.measure_basis import measure_basis_spectra
 from fields.common_functions import readGadgetSnapshot
