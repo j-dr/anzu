@@ -279,8 +279,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
         if rank==0:
             print('Applying scale dependent growth transfer function', flush=True)
         u = apply_scale_dependent_growth(u, nmesh, Lbox, rank, nranks, fft, configs, z)
-        d = newDistArray(fft, False)
-        d[:] = u
+    d = newDistArray(fft, False)
+    d[:] = u
 
         
     if compute_cv_surrogate:
