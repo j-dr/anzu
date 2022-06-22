@@ -345,11 +345,11 @@ def measure_basis_spectra(
     # don't use neutrinos for CV surrogate. cb field should be fine.
     if cv_surrogate:
         use_neutrinos = False
-        basename = "mpi_icfields_nmesh_filt"
+        basename = "mpi_advfields_nmesh_filt"
         outname = "basis_spectra_za_surrogate"
     else:
         use_neutrinos = configs["use_neutrinos"]
-        basename = "mpi_icfields_nmesh"
+        basename = "mpi_advfields_nmesh"
         outname = "basis_spectra_nbody"
 
     comm = MPI.COMM_WORLD
@@ -533,10 +533,16 @@ def measure_basis_spectra(
         if rank == 0:
             sys.stdout.flush()
         if configs["save_advected_fields"]:
-            np.save(
-                componentdir + "latetime_weight_%s_%s_rank%s" % (k, nmesh, rank),
-                fieldlist[k].value,
-            )
+            if cv_surrogate:
+                np.save(
+                    componentdir + "latetime_zeldovich_weight_{}_z{}_{}_rank{}".format(k, zbox, nmesh, rank),
+                    fieldlist[k].value,
+                )                
+            else:
+                np.save(
+                    componentdir + "latetime_nbody_weight_{}_z{}_{}_rank{}".format(k, zbox, nmesh, rank),
+                    fieldlist[k].value,
+                )
 
         if compensate:
             fieldlist[k] = fieldlist[k].r2c()
