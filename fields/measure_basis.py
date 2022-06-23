@@ -345,7 +345,7 @@ def measure_basis_spectra(
     # don't use neutrinos for CV surrogate. cb field should be fine.
     if cv_surrogate:
         use_neutrinos = False
-        basename = "mpi_icfiles_nmesh_filt"
+        basename = "mpi_icfields_nmesh_filt"
         outname = "basis_spectra_za_surrogate"
     else:
         use_neutrinos = configs["use_neutrinos"]
