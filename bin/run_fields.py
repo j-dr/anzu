@@ -2,7 +2,7 @@ import numpy as np
 import sys, os
 from fields.make_lagfields import make_lagfields
 from fields.measure_basis import measure_basis_spectra
-from fields.common_functions import readGadgetSnapshot
+from fields.common_functions import get_snap_z
 from mpi4py import MPI
 from copy import copy
 from glob import glob
@@ -10,33 +10,6 @@ from yaml import Loader
 import sys, yaml
 import h5py
 import gc
-
-
-def get_snap_z(basedir, sim_type):
-    """Count up the number of particles that will be read in by this rank.
-
-    Args:
-        snapfiles list: List of blocks assigned to this rank
-        sim_type str: Type of simulation (format)
-
-    Returns:
-        npart int: Number of particles assigned to this rank.
-    """
-
-    if sim_type == "Gadget_hdf5":
-        snapfiles = glob(basedir + "*hdf5")
-        f = snapfiles[0]
-        with h5py.File(f, "r") as block:
-            z_this = block["Header"].attrs["Redshift"]
-
-    elif sim_type == "Gadget":
-        snapfiles = glob(basedir + "*")
-        f = snapfiles[0]
-        header = readGadgetSnapshot(f, read_id=False, read_pos=False)
-        z_this = header["redshift"]
-
-    return z_this
-
 
 if __name__ == "__main__":
 
