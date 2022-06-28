@@ -1,5 +1,9 @@
-from ..fields.measure_basis import advect_fields, get_snap_z
-from ..fields.make_lagfields import make_lagfields
+import sys
+sys.path.append('/pscratch/sd/j/jderose/anzu/')
+sys.path.append('/pscratch/sd/j/jderose/anzu/fields/')
+from fields.common_functions import get_snap_z
+from fields.measure_basis import advect_fields
+from fields.make_lagfields import make_lagfields
 from mpi4py import MPI
 from glob import glob
 import numpy as np
@@ -36,17 +40,18 @@ def measure_field_level_bias(comm, pm, tracer_pos, field_dict, field_D, nmesh, k
     layout = pm.decompose(tracer_pos)
     p = layout.exchange(tracer_pos)    
     tracerfield = pm.paint(p, mass=1, resampler="cic")
-    tracerfield.compute(mode='complex', Nmesh=nmesh)
+    tracerfield = tracerfield.r2c()
     
     del tracer_pos, p
     
     if M is None:
         M = np.zeros((len(field_dict), len(field_dict), len(kmax)))
         
-    A = np.zeros((len(field_dict)), len(kmax))
+    A = np.zeros((len(field_dict), len(kmax)))
     
     eps = tracerfield
-    cb.compute(mode='complex', Nmesh=nmesh)
+    if type(cb) is RealField:
+        cb = cb.r2c()
     
     dk = np.pi / Lbox
     
@@ -55,7 +60,8 @@ def measure_field_level_bias(comm, pm, tracer_pos, field_dict, field_D, nmesh, k
     
     for i, k1 in enumerate(field_dict):
         f1 = field_dict[k1]
-        f1.compute(mode='complex', Nmesh=nmesh)
+        if type(f1) is RealField:
+            f1 = f1.r2c()
         
         o = f1.copy()
         for (s0, s1, s2) in zip(o.slabs, f1.slabs, eps.slabs):
@@ -68,7 +74,8 @@ def measure_field_level_bias(comm, pm, tracer_pos, field_dict, field_D, nmesh, k
                 f2 = field_dict[k2]
                 if j>i: continue
 
-                f2.compute(mode='complex', Nmesh=nmesh)
+                if type(f2) is RealField:
+                    f2 = f2.r2c()
                 
                 o = f1.copy()
                 
@@ -79,6 +86,10 @@ def measure_field_level_bias(comm, pm, tracer_pos, field_dict, field_D, nmesh, k
             
     comm.Allreduce(A, A)
     comm.Allreduce(M, M)
+
+    M += M.T
+    for i in range(len(M)):
+        M[i,i] /= 2
     
     b = np.dot(np.linalv.inv(M), A)
     
@@ -97,7 +108,9 @@ if __name__ == "__main__":
         config = yaml.load(fp, Loader=Loader)
         
     scale_dependent_growth = bool(config.pop("scale_dependent_growth", False))
-    config["scale_dependent_growth"] = scale_dependent_growth        
+    config["scale_dependent_growth"] = scale_dependent_growth
+    lattice_type = int(config.pop('lattice_type', 0))
+    config['lattice_type'] = lattice_type
     
     if scale_dependent_growth:
         z = get_snap_z(config["particledir"], config["sim_type"])
@@ -110,7 +123,7 @@ if __name__ == "__main__":
     tracer_file = config['tracer_file']
     kmax = np.atleast_1d(config['field_level_kmax'])
     nmesh = int(config['nmesh_out'])
-    Lbox = float(config['Lbox'])
+    Lbox = float(config['lbox'])
     
     if config['rsd']:
         tracer_pos = h5py.File(tracer_file)['pos_zspace'][rank::size,:]
