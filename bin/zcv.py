@@ -125,7 +125,6 @@ if __name__ == "__main__":
         keynames,
         labelvec,
         zbox,
-        lag_field_dict=lag_field_dict,
         field_dict2=field_dict2,
         field_D2=field_D2,
         save=False
