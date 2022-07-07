@@ -426,7 +426,7 @@ def measure_basis_spectra(
     else:
         pk_auto_vec = copy(kpkvec)
 
-    mpiprint("measuring spectra took {}s".format(time.time() - start_time))
+    mpiprint("measuring spectra took {}s".format(time.time() - start_time), rank)
 
     # if we passed another field dict in to this function, cross correlate everything with everything
     if field_dict2:
@@ -460,7 +460,7 @@ def measure_basis_spectra(
                     ),
                     kpkvec,
                 )
-        mpiprint("measuring cross spectra took {}s".format(time.time() - start_time))
+        mpiprint("measuring cross spectra took {}s".format(time.time() - start_time), rank)
         
     return pk_auto_vec, kpkvec
             
