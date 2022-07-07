@@ -69,8 +69,9 @@ if __name__ == "__main__":
         config = yaml.load(fp, Loader=Loader)
     
     config['compute_cv_surrogate'] = True
-    scale_dependent_growth = bool(config.get("scale_dependent_growth", False))
+    config['scale_dependent_growth'] = False
     lattice_type = int(config.get('lattice_type', 0))
+    config['lattice_type'] = lattice_type
     lindir = config["outdir"]
     tracer_file = config['tracer_file']
     kmax = np.atleast_1d(config['field_level_kmax'])
@@ -89,7 +90,7 @@ if __name__ == "__main__":
     
     #create/load surrogate linear fields
     linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
-    if not os.path.exists(linfields[0]):
+    if len(linfields)==0:
         lag_field_dict = make_lagfields(config, save_to_disk=True)
     else:
         lag_field_dict = None
