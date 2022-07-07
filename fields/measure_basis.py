@@ -152,7 +152,7 @@ def advect_fields(configs, lag_field_dict=None):
         configs["sim_type"],
         rank,
         nranks,
-        basedir=fdir
+        basedir=fdir,
         cv_surrogate=cv_surrogate,
         icfile=configs["icdir"],
         ic_format=configs["ic_format"],
