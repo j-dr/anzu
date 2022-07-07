@@ -81,7 +81,6 @@ def send_parts_to_weights(idvec, posvec, nmesh, comm, idfac, overload):
     send_rank = send_rank[idx]
 
     # figure out how many things we're sending where
-#    send_counts, _ = np.histogram(send_rank + 1, np.arange(nranks + 1))
     send_counts = np.bincount(send_rank, minlength=nranks)
     recv_counts = np.zeros_like(send_counts)
     comm.Alltoall(send_counts, recv_counts)
@@ -220,12 +219,10 @@ def advect_fields(configs, lag_field_dict=None):
     overload = 1 << configs["lattice_type"]
 
     if lag_field_dict:
-        posvec, idvec = send_parts_to_weights(idvec, posvec, nmesh, comm, idfac, overload)
-        a_ic = (
-            (((idvec - idfac) // overload) // nmesh ** 2)
-            % nmesh
-            % (nmesh // nranks)
+        posvec, idvec = send_parts_to_weights(
+            idvec, posvec, nmesh, comm, idfac, overload
         )
+        a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh % (nmesh // nranks)
     else:
         a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh
 
@@ -240,16 +237,15 @@ def advect_fields(configs, lag_field_dict=None):
     p = layout.exchange(posvec)
 
     if lag_field_dict:
-        kdict = lag_field_dict.keys()        
+        kdict = lag_field_dict.keys()
         lag_field_dict_new = {}
         for k in kdict:
             lag_field_dict_new[k] = layout.exchange(lag_field_dict[k][a_ic, b_ic, c_ic])
         del lag_field_dict
         lag_field_dict = lag_field_dict_new
-        
+
     del posvec
     gc.collect()
-    
 
     for k in range(len(fieldlist)):
         if keynames[k] == "1m":
@@ -307,12 +303,18 @@ def advect_fields(configs, lag_field_dict=None):
         if configs["save_advected_fields"]:
             if cv_surrogate:
                 np.save(
-                    componentdir + "latetime_zeldovich_weight_{}_z{}_{}_rank{}".format(k, zbox, nmesh, rank),
+                    componentdir
+                    + "latetime_zeldovich_weight_{}_z{}_{}_rank{}".format(
+                        k, zbox, nmesh, rank
+                    ),
                     fieldlist[k].value,
-                )                
+                )
             else:
                 np.save(
-                    componentdir + "latetime_nbody_weight_{}_z{}_{}_rank{}".format(k, zbox, nmesh, rank),
+                    componentdir
+                    + "latetime_nbody_weight_{}_z{}_{}_rank{}".format(
+                        k, zbox, nmesh, rank
+                    ),
                     fieldlist[k].value,
                 )
 
@@ -341,14 +343,21 @@ def advect_fields(configs, lag_field_dict=None):
 
     if configs["scale_dependent_growth"]:
         field_D = [1, 1, 1, 1, 1, 1]
-        
+
     field_dict = dict(zip(labelvec, fieldlist))
-    
+
     return pm, field_dict, field_D, keynames, labelvec, zbox
 
 
 def measure_basis_spectra(
-    configs, lag_field_dict=None, field_dict2=None, field_D2=None
+    configs,
+    field_dict,
+    field_D,
+    keynames,
+    labelvec,
+    zbox,
+    field_dict2=None,
+    field_D2=None,
 ):
     nmesh = configs["nmesh_in"]
     Lbox = configs["lbox"]
@@ -378,7 +387,6 @@ def measure_basis_spectra(
     rank = comm.Get_rank()
     nranks = comm.Get_size()
     start_time = time.time()
-    pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(configs, lag_field_dict=lag_field_dict)
 
     #######################################################################################################################
     #################################### Measuring P(k) ###################################################################
@@ -449,7 +457,27 @@ def measure_basis_spectra(
             )
             print("measuring cross spectra took {}s".format(time.time() - start_time))
 
-    return field_dict, field_D
+
+def advect_fields_and_measure_spectra(
+    config, lag_field_dict=None, field_dict2=None, field_D2=None
+):
+    pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(
+        config, lag_field_dict=lag_field_dict
+    )
+
+    measure_basis_spectra(
+        config,
+        field_dict,
+        field_D,
+        keynames,
+        labelvec,
+        zbox,
+        lag_field_dict=lag_field_dict,
+        field_dict2=field_dict2,
+        field_D2=field_D2,
+    )
+
+    return field_dict, field_D, keynames, labelvec, zbox
 
 
 if __name__ == "__main__":

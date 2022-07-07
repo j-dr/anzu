@@ -1,7 +1,7 @@
 import numpy as np
 import sys, os
 from fields.make_lagfields import make_lagfields
-from fields.measure_basis import measure_basis_spectra
+from fields.measure_basis import advect_fields_and_measure_spectra
 from fields.common_functions import get_snap_z
 from mpi4py import MPI
 from copy import copy
@@ -77,13 +77,13 @@ if __name__ == "__main__":
         print("Constructing z_ic lagrangian fields", flush=True)
 
     if not skip_lagfields:
-        #just use d_lin from IC code here
-        config['scale_dependent_growth'] = False
+        # just use d_lin from IC code here
+        config["scale_dependent_growth"] = False
         out = make_lagfields(config, save_to_disk=True)
         del out
         gc.collect()
-        config['scale_dependent_growth'] = scale_dependent_growth
-        
+        config["scale_dependent_growth"] = scale_dependent_growth
+
         if do_surrogates:
             out = make_lagfields(config_surr, save_to_disk=True)
             del out
@@ -93,7 +93,6 @@ if __name__ == "__main__":
         print("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
 
     if do_rs:
-
         for i in range(nsnaps):
             if i < start_snapnum:
                 continue
@@ -108,12 +107,14 @@ if __name__ == "__main__":
             else:
                 lag_field_dict = None
 
-            field_dict, D = measure_basis_spectra(config, lag_field_dict)
-#            field_dict, D = measure_basis_spectra(config, None)
-
+            field_dict, field_D, _, _, _ = advect_fields_and_measure_spectra(
+                config, lag_field_dict=lag_field_dict
+            )
             if do_surrogates:
                 config_surr["particledir"] = pdirs[i]
-                measure_basis_spectra(config_surr, field_dict2=field_dict, field_D2=D)
+                _ = advect_fields_and_measure_spectra(
+                    config_surr, field_dict2=field_dict, field_D2=field_D
+                )
 
     if do_rsd:
 
@@ -127,8 +128,12 @@ if __name__ == "__main__":
                 print("Processing snapshot {}".format(i), flush=True)
 
             config["particledir"] = pdirs[i]
-            field_dict, D = measure_basis_spectra(config)
+            field_dict, field_D, _, _, _ = advect_fields_and_measure_spectra(
+                config, lag_field_dict=lag_field_dict
+            )
 
             if do_surrogates:
                 config_surr["particledir"] = pdirs[i]
-                measure_basis_spectra(config_surr, field_dict2=field_dict, field_D2=D)
+                _ = advect_fields_and_measure_spectra(
+                    config_surr, field_dict2=field_dict, field_D2=field_D
+                )

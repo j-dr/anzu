@@ -1,6 +1,4 @@
 import sys
-sys.path.append('/pscratch/sd/j/jderose/anzu/')
-sys.path.append('/pscratch/sd/j/jderose/anzu/fields/')
 from fields.common_functions import get_snap_z
 from fields.measure_basis import advect_fields
 from fields.make_lagfields import make_lagfields
