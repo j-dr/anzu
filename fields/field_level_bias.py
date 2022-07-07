@@ -26,7 +26,7 @@ def integrate_field_to_kmax(field, kmax, dk):
     return sum[i]
 
 
-def measure_field_level_bias(comm, pm, tracer_pos, field_dict, field_D, nmesh, kmax, Lbox, M=None):
+def measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=None):
     
     m = field_dict.pop('1m', None)
     if m is not None:
@@ -35,12 +35,6 @@ def measure_field_level_bias(comm, pm, tracer_pos, field_dict, field_D, nmesh, k
     cb = field_dict.pop('1cb')
     field_D = field_D[1:]
 
-    layout = pm.decompose(tracer_pos)
-    p = layout.exchange(tracer_pos)    
-    tracerfield = pm.paint(p, mass=1, resampler="cic")
-    tracerfield = tracerfield.r2c()
-    
-    del tracer_pos, p
     
     if M is None:
         M = np.zeros((len(field_dict), len(field_dict), len(kmax)))
@@ -93,28 +87,26 @@ def measure_field_level_bias(comm, pm, tracer_pos, field_dict, field_D, nmesh, k
     
     return b, M, A
 
-
-if __name__ == "__main__":
+def advect_and_measure_bias(config):
     
     comm = MPI.COMM_WORLD
     rank = comm.rank
-    size = comm.size 
-    
-    config = sys.argv[1]
-    
-    with open(config, "r") as fp:
-        config = yaml.load(fp, Loader=Loader)
-        
+    size = comm.size    
+
     scale_dependent_growth = bool(config.pop("scale_dependent_growth", False))
     config["scale_dependent_growth"] = scale_dependent_growth
     lattice_type = int(config.pop('lattice_type', 0))
     config['lattice_type'] = lattice_type
+    if 'bias' not in config:
+        bias_vec = None
+    else:
+        bias_vec = config['bias_vec']
     
     if scale_dependent_growth:
         z = get_snap_z(config["particledir"], config["sim_type"])
         lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
     else:
-        lag_field_dict = None    
+        lag_field_dict = None
 
     pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(config, lag_field_dict=lag_field_dict)
 
@@ -128,11 +120,24 @@ if __name__ == "__main__":
     else:
         tracer_pos = h5py.File(tracer_file)['pos_rspace'][rank::size,:]
         
+    layout = pm.decompose(tracer_pos)
+    p = layout.exchange(tracer_pos)
+    tracerfield = pm.paint(p, mass=1, resampler="cic")
+    tracerfield = tracerfield.r2c()
     
-    bias_vec, M, A = measure_field_level_bias(comm, pm, tracer_pos, field_dict, field_D, nmesh, kmax, Lbox)
+    del tracer_pos, p        
+        
+    bias_vec, M, A = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox)
     
     np.save('{}/b_{}_{}.npy'.format(config['outdir'], tracer_file.split('/')[-1], zbox), bias_vec)
     np.save('{}/M_{}_{}.npy'.format(config['outdir'], tracer_file.split('/')[-1], zbox), M)    
     np.save('{}/A_{}_{}.npy'.format(config['outdir'], tracer_file.split('/')[-1], zbox), A)
+
+if __name__ == "__main__":
     
+    config = sys.argv[1]
     
+    with open(config, "r") as fp:
+        config = yaml.load(fp, Loader=Loader)
+        
+    advect_and_measure_bias(config)

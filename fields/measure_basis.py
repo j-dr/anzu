@@ -2,6 +2,7 @@ from .common_functions import load_particles, measure_pk
 from classy import Class
 from mpi4py import MPI
 from glob import glob
+from copy import copy
 import numpy as np
 import time, sys, gc, psutil, os, yaml
 import pmesh, h5py
@@ -148,10 +149,10 @@ def advect_fields(configs, lag_field_dict=None):
 
     # Load in a subset of the total gadget snapshot.
     posvec, idvec, npart_this, zbox, m_cb, D = load_particles(
-        fdir,
         configs["sim_type"],
         rank,
         nranks,
+        basedir=fdir
         cv_surrogate=cv_surrogate,
         icfile=configs["icdir"],
         ic_format=configs["ic_format"],
@@ -358,6 +359,7 @@ def measure_basis_spectra(
     zbox,
     field_dict2=None,
     field_D2=None,
+    save=True
 ):
     nmesh = configs["nmesh_in"]
     Lbox = configs["lbox"]
@@ -412,16 +414,19 @@ def measure_basis_spectra(
                 pkcounter += 1
                 mpiprint(("pk done ", pkcounter), rank)
 
-    if rank == 0:
-        np.save(
-            componentdir
-            + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                outname, rsd, use_pypower, 1 / (zbox + 1), nmesh
-            ),
-            kpkvec,
-        )
+    if save:
+        if rank == 0:
+            np.save(
+                componentdir
+                + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
+                    outname, rsd, use_pypower, 1 / (zbox + 1), nmesh
+                ),
+                kpkvec,
+            )
+    else:
+        pk_auto_vec = copy(kpkvec)
 
-        print("measuring spectra took {}s".format(time.time() - start_time))
+    mpiprint("measuring spectra took {}s".format(time.time() - start_time))
 
     # if we passed another field dict in to this function, cross correlate everything with everything
     if field_dict2:
@@ -446,16 +451,20 @@ def measure_basis_spectra(
                     kpkvec.append(pkdict)
                     pkcounter += 1
                     mpiprint(("pk done ", pkcounter), rank)
-
-        if rank == 0:
-            np.save(
-                componentdir
-                + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                    outname + "_crosscorr", rsd, use_pypower, 1 / (zbox + 1), nmesh
-                ),
-                kpkvec,
-            )
-            print("measuring cross spectra took {}s".format(time.time() - start_time))
+        if save:
+            if rank == 0:
+                np.save(
+                    componentdir
+                    + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
+                        outname + "_crosscorr", rsd, use_pypower, 1 / (zbox + 1), nmesh
+                    ),
+                    kpkvec,
+                )
+        mpiprint("measuring cross spectra took {}s".format(time.time() - start_time))
+        
+    return pk_auto_vec, kpkvec
+            
+    
 
 
 def advect_fields_and_measure_spectra(

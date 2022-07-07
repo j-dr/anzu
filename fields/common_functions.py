@@ -190,10 +190,10 @@ def get_Nparts(snapfiles, sim_type, parttype):
         return npart, z_this, mass
 
 def load_particles(
-    basedir,
     sim_type,
     rank,
     size,
+    basedir=None,
     parttype=1,
     cv_surrogate=False,
     icfile=None,
@@ -204,22 +204,35 @@ def load_particles(
     boltz=None,
     z_ic=None,
     rsd=False,
+    z_this=None
 ):
 
-    if sim_type == "Gadget_hdf5":
-        snapfiles = glob(basedir + "*hdf5")
-    elif sim_type == "Gadget":
-        snapfiles = glob(basedir + "*")
+    if not cv_surrogate:
+        if sim_type == "Gadget_hdf5":
+            snapfiles = glob(basedir + "*hdf5")
+        elif sim_type == "Gadget":
+            snapfiles = glob(basedir + "*")
+        
+        snapfiles_this = snapfiles[rank::size]
+        nfiles_this = len(snapfiles_this)
+        npart_this, z_this, mass = get_Nparts(snapfiles_this, sim_type, parttype)            
+        pos = np.zeros((npart_this, 3))
+        if parttype == 1:
+            ids = np.zeros(npart_this, dtype=np.int)
+        else:
+            # don't need ids for neutrinos, since not weighting
+            ids = None
+    else:
+        npart_this = None
+        if z_this is None:
+            assert basedir is not None
+            z_this = get_snap_z(basedir, sim_type)
 
     if cv_surrogate:
         assert icfile is not None
         assert ic_format is not None
         assert nmesh is not None
         assert lbox is not None
-
-    snapfiles_this = snapfiles[rank::size]
-    nfiles_this = len(snapfiles_this)
-    npart_this, z_this, mass = get_Nparts(snapfiles_this, sim_type, parttype)
 
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)
@@ -228,13 +241,6 @@ def load_particles(
 
     if rsd:
         v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()  # (v_p = v_gad * a^(1/2))
-
-    pos = np.zeros((npart_this, 3))
-    if parttype == 1:
-        ids = np.zeros(npart_this, dtype=np.int)
-    else:
-        # don't need ids for neutrinos, since not weighting
-        ids = None
 
     if not cv_surrogate:
         npart_counter = 0
