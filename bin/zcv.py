@@ -143,7 +143,7 @@ if __name__ == "__main__":
         + "{}_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
             tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
         ),
-        pk_tt_dict,
+        [pk_tt_dict],
     )
     
     np.save(
