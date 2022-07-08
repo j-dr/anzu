@@ -142,7 +142,8 @@ class LPTEmulator(object):
         self.extrap = extrap
         self.kmin_pl = kmin_pl
         self.kmax_pl = kmax_pl
-        self.forceLPT = forceLPT
+        self.forceLPT = forceLPT 
+        self.nspec = 14
 
         self.param_mean = None
         self.param_mult = None
@@ -206,9 +207,9 @@ class LPTEmulator(object):
     def _get_pcs(self, evec_spec, spectra, npc):
 
         nout = np.prod(spectra.shape[:2])
-        pcs_spec = np.zeros((nout, 10, self.npc))
+        pcs_spec = np.zeros((nout, self.nspec, self.npc))
 
-        for si in range(10):
+        for si in range(self.nspec):
             pcs_spec[:, si, :] = np.dot(spectra[:, :, si, :].reshape(-1, self.nk),
                                         evec_spec[si, :, :npc])
 
@@ -299,20 +300,20 @@ class LPTEmulator(object):
         nsim = len(simoverlpt)
 
         # Non mean-subtracted PCs
-        Xs = np.zeros((10, self.nk, self.nk))
-        for i in range(10):
+        Xs = np.zeros((self.nspec, self.nk, self.nk))
+        for i in range(self.nspec):
             Xs[i, :, :] = np.dot(simoverlpt[:, :, i, :].reshape(
                 self.nz * (nsim), -1).T,
                 simoverlpt[:, :, i, :].reshape(self.nz * (nsim), -1))
 
         # PC basis for each type of spectrum, independent of z and cosmo
-        evec_spec = np.zeros((10, self.nk, self.nk))
+        evec_spec = np.zeros((self.nspec, self.nk, self.nk))
 
         # variance per PC
-        vars_spec = np.zeros((10, self.nk))
+        vars_spec = np.zeros((self.nspec, self.nk))
 
         # computing PCs
-        for si in range(10):
+        for si in range(self.nspec):
             var, pcs = np.linalg.eig(Xs[si, ...])
 
             evec_spec[si, :, :] = pcs
@@ -343,7 +344,7 @@ class LPTEmulator(object):
                 dt = np.dtype([('omegab', np.float), ('omegam', np.float),
                                ('w0', np.float), ('ns', np.float),
                                ('ln10As', np.float), ('H0', np.float),
-                               ('Neff', np.float)])
+                               ('nu_mass_ev', np.float)])
                 cosmos_temp = np.zeros(ncosmos, dtype=dt)
                 cosmos_temp['omegab'] = cosmos['ombh2'] / \
                     (cosmos['H0'] / 100)**2
@@ -351,15 +352,15 @@ class LPTEmulator(object):
                     (cosmos['H0'] / 100)**2
                 cosmos_temp['w0'] = cosmos['w0']
                 cosmos_temp['ns'] = cosmos['ns']
-                cosmos_temp['ln10As'] = cosmos['ln10As']
+                cosmos_temp['As'] = cosmos['As']
                 cosmos_temp['H0'] = cosmos['H0']
-                cosmos_temp['Neff'] = cosmos['Neff']
+                cosmos_temp['nu_mass_ev'] = cosmos['nu_mass_ev']
                 cosmos = cosmos_temp
             else:
                 dt = np.dtype([('omegab', np.float), ('omegam', np.float),
                                ('w0', np.float), ('ns', np.float),
                                ('sigma8', np.float), ('H0', np.float),
-                               ('Neff', np.float)])
+                               ('nu_mass_ev', np.float)])
                 cosmos_temp = np.zeros(ncosmos, dtype=dt)
                 cosmos_temp['omegab'] = cosmos['ombh2'] / \
                     (cosmos['H0'] / 100)**2
@@ -369,22 +370,22 @@ class LPTEmulator(object):
                 cosmos_temp['ns'] = cosmos['ns']
                 cosmos_temp['sigma8'] = cosmos['sigma8']
                 cosmos_temp['H0'] = cosmos['H0']
-                cosmos_temp['Neff'] = cosmos['Neff']
+                cosmos_temp['nu_mass_ev'] = cosmos['nu_mass_ev']
                 cosmos = cosmos_temp
         else:
             if not self.use_sigma_8:
                 dt = np.dtype([('ombh2', np.float), ('omch2', np.float),
                                ('w0', np.float), ('ns', np.float),
                                ('ln10As', np.float), ('H0', np.float),
-                               ('Neff', np.float)])
+                               ('nu_mass_ev', np.float)])
                 cosmos_temp = np.zeros(ncosmos, dtype=dt)
                 cosmos_temp['ombh2'] = cosmos['ombh2']
                 cosmos_temp['omch2'] = cosmos['omch2']
                 cosmos_temp['w0'] = cosmos['w0']
                 cosmos_temp['ns'] = cosmos['ns']
-                cosmos_temp['ln10As'] = cosmos['ln10As']
+                cosmos_temp['As'] = cosmos['As']
                 cosmos_temp['H0'] = cosmos['H0']
-                cosmos_temp['Neff'] = cosmos['Neff']
+                cosmos_temp['nu_mass_ev'] = cosmos['nu_mass_ev']
                 cosmos = cosmos_temp
 
             else:
@@ -399,7 +400,7 @@ class LPTEmulator(object):
                 cosmos_temp['ns'] = cosmos['ns']
                 cosmos_temp['sigma8'] = cosmos['sigma8']
                 cosmos_temp['H0'] = cosmos['H0']
-                cosmos_temp['Neff'] = cosmos['Neff']
+                cosmos_temp['nu_mass_ev'] = cosmos['nu_mass_ev']
                 cosmos = cosmos_temp
 
         param_ranges = np.array(
@@ -444,7 +445,7 @@ class LPTEmulator(object):
             self.surrogates = []
 
             # PCE coefficient regression
-            for i in range(10):
+            for i in range(self.nspec):
                 pce = cp.orth_ttr(self.npoly[i], distribution,
                                   cross_truncation=self.qtrunc)
                 surrogate = cp.fit_regression(
@@ -492,17 +493,17 @@ class LPTEmulator(object):
         if self.surrogate_type == 'PCE':
             if hyperparams is None:
                 npoly = np.array([1, 2, 1, 1, 3, 2, 1, 3])
-                npoly = np.tile(npoly, [10, 1])
+                npoly = np.tile(npoly, [self.nspec, 1])
                 qtrunc = 1
             else:
                 if 'npoly' not in hyperparams.keys():
                     npoly = np.array([1, 2, 1, 1, 3, 2, 1, 3])
-                    npoly = np.tile(npoly, [10, 1])
+                    npoly = np.tile(npoly, [self.nspec, 1])
 
                 else:
                     npoly = hyperparams['npoly']
                     if len(npoly.shape) == 1:
-                        npoly = np.tile(npoly, [10, 1])
+                        npoly = np.tile(npoly, [self.nspec, 1])
 
                 if 'qtrunc' not in hyperparams.keys():
                     qtrunc = 1
@@ -570,7 +571,7 @@ class LPTEmulator(object):
 
         return pk_emu
 
-    def basis_to_full(self, k, btheta, emu_spec, halomatter=True):
+    def basis_to_full(self, k, btheta, emu_spec, cross=True):
         """
         Take an LPTemulator.predict() array and combine with bias parameters to obtain predictions for P_hh and P_hm. 
 
@@ -609,54 +610,55 @@ class LPTEmulator(object):
         if len(btheta) == 4:
             b1, b2, bs, sn = btheta
             # Cross-component-spectra are multiplied by 2, b_2 is 2x larger than in velocileptors
-            bterms_hh = [1,
-                         2*b1, b1**2,
-                         b2, b2*b1, 0.25*b2**2,
-                         2*bs, 2*bs*b1, bs*b2, bs**2]
+            bterms_hh = [0, 1,
+                         0, 2*b1, b1**2,
+                         0, b2, b2*b1, 0.25*b2**2,
+                         0, 2*bs, 2*bs*b1, bs*b2, bs**2]
 
             # hm correlations only have one kind of <1,delta_i> correlation
-            bterms_hm = [1,
-                         b1, 0,
-                         b2/2, 0, 0,
-                         bs, 0, 0, 0]
+            bterms_hm = [1, 0,
+                         b1, 0, 0,
+                         b2/2, 0, 0, 0,
+                         bs, 0, 0, 0, 0]
 
             pkvec = emu_spec
 
         else:
             b1, b2, bs, bk2, sn = btheta
             # Cross-component-spectra are multiplied by 2, b_2 is 2x larger than in velocileptors
-            bterms_hh = [1,
-                         2*b1, b1**2,
-                         b2, b2*b1, 0.25*b2**2,
-                         2*bs, 2*bs*b1, bs*b2, bs**2,
-                         2*bk2, 2*bk2*b1, bk2*b2, 2*bk2*bs]
+            bterms_hh = [0, 1,
+                         0, 2*b1, b1**2,
+                         0, b2, b2*b1, 0.25*b2**2,
+                         0, 2*bs, 2*bs*b1, bs*b2, bs**2,
+                         0, 2*bk2, 2*bk2*b1, bk2*b2, 2*bk2*bs]
 
             # hm correlations only have one kind of <1,delta_i> correlation
-            bterms_hm = [1,
-                         b1, 0,
-                         b2/2, 0, 0,
-                         bs, 0, 0, 0,
-                         bk2, 0, 0, 0]
+            bterms_hm = [1, 0,
+                         b1, 0, 0,
+                         b2/2, 0, 0, 0,
+                         bs, 0, 0, 0, 0, 
+                         bk2, 0, 0, 0, 0]
 
-            pkvec = np.zeros(shape=(14, len(k)))
-            pkvec[:10] = emu_spec
+            pkvec = np.zeros(shape=(self.nspec + 4, len(k)))
+            pkvec[:self.nspec] = emu_spec
 
             # IDs for the <nabla^2, X> ~ -k^2 <1, X> approximation.
-            nabla_idx = [0, 1, 3, 6]
+            if cross:
+                nabla_idx = [0, 2, 5, 9]
+            else:
+                nabla_idx = [1, 3, 6, 10]
 
             # Higher derivative terms
-            pkvec[10:] = -k**2 * pkvec[nabla_idx]
+            pkvec[self.nspec:] = -k**2 * pkvec[nabla_idx]
 
-        bterms_hh = np.array(bterms_hh)
-
-        p_hh = np.einsum('b, bk->k', bterms_hh, pkvec) + sn
-        pfull = p_hh
-
-        if halomatter:
+        if cross:
             bterms_hm = np.array(bterms_hm)
-            p_hm = np.einsum('b, bk->k', bterms_hm, pkvec)
-            pfull = np.hstack([p_hh, p_hm])
-
+            pfull = np.einsum('b, bk->k', bterms_hm, pkvec)
+            
+        else:
+            bterms_hh = np.array(bterms_hh)
+            pfull = np.einsum('b, bk->k', bterms_hh, pkvec) + sn
+        
         return pfull
 
     def _pce_predict(self, k, cosmo, spec_lpt, k_lpt=None, lambda_pce=None,
@@ -724,9 +726,9 @@ class LPTEmulator(object):
 
             # otherwise just use the surrogates to compute PCs
             else:
-                lambda_pce_normed = np.zeros((len(cosmo), 10, self.npc))
+                lambda_pce_normed = np.zeros((len(cosmo), self.nspec, self.npc))
 
-                for i in range(10):
+                for i in range(self.nspec):
                     start = time.time()
                     lambda_pce_normed[:, i, ...] = self.surrogates[i](
                         *cosmo_scaled.T).T
