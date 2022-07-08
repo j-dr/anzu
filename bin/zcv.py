@@ -109,6 +109,7 @@ if __name__ == "__main__":
     layout = pm.decompose(tracer_pos)
     p = layout.exchange(tracer_pos)
     tracerfield = pm.paint(p, mass=1, resampler="cic")
+    tracerfield = tracerfield / tracerfield.cmean() - 1
     tracerfield = tracerfield.r2c()
     del tracer_pos, p                
         
