@@ -4,7 +4,9 @@ from fields.make_lagfields import make_lagfields
 from fields.measure_basis import advect_fields, measure_basis_spectra
 from fields.common_functions import get_snap_z, measure_pk
 from fields.field_level_bias import measure_field_level_bias
+from anzu.utils import combine_real_space_spectra, combine_measured_rsd_spectra
 from scipy.optimize import minimize
+from scipy.interpolate import interp1d
 from mpi4py import MPI
 from copy import copy
 from glob import glob
@@ -12,6 +14,7 @@ from yaml import Loader
 import sys, yaml
 import h5py
 import gc
+
 
 def pk_list_to_vec(pk_ij_list):
 
@@ -53,9 +56,23 @@ def pk_list_to_vec(pk_ij_list):
     else:
         return k, mu, pk_wedge_array, None
 
-def measure_2pt_bias(k, pk_ij_heft, pk_tt, kmax):
+def measure_2pt_bias(k, pk_ij_heft, pk_tt, kmax, rsd=False):
     
-    return None
+    kidx = k.searchsorted(kmax)
+    kcut = k[:kidx]
+    pk_tt_kcut = pk_tt[:kidx]
+    pk_ij_heft_kcut = pk_ij_heft[:,...,:kidx,np.newaxis]
+    
+    if not rsd:
+        loss = lambda bvec : np.sum((pk_tt_kcut - combine_real_space_spectra(kcut, pk_ij_heft_kcut, bvec)[:,0])**2/(pk_tt_kcut**2))
+        bvec0 = [1, 0, 0, 0, 0]
+    else:
+        loss = lambda bvec : np.sum((pk_tt_kcut - combine_measured_rsd_spectra(kcut, pk_ij_heft_kcut, None, bvec)[:,0])**2/(pk_tt_kcut**2))
+        bvec0 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    
+    out = minimize(loss, bvec0)
+    
+    return out
 
 if __name__ == "__main__":
     
@@ -109,6 +126,7 @@ if __name__ == "__main__":
     layout = pm.decompose(tracer_pos)
     p = layout.exchange(tracer_pos)
     tracerfield = pm.paint(p, mass=1, resampler="cic")
+    tracerfield = tracerfield / tracerfield.cmean() - 1
     tracerfield = tracerfield.r2c()
     del tracer_pos, p                
         
