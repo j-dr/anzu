@@ -126,7 +126,7 @@ class LPTEmulator(object):
         self.use_physical_densities = use_physical_densities
         self.use_sigma_8 = use_sigma_8
 
-        if not zs:
+        if zs is None:
             self.zs = np.array(
                 [3.0, 2.0, 1.0, 0.85, 0.7, 0.55, 0.4, 0.25, 0.1, 0.0])
         else:
