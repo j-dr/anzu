@@ -343,7 +343,7 @@ class LPTEmulator(object):
             if not self.use_sigma_8:
                 dt = np.dtype([('omegab', np.float), ('omegam', np.float),
                                ('w0', np.float), ('ns', np.float),
-                               ('ln10As', np.float), ('H0', np.float),
+                               ('As', np.float), ('H0', np.float),
                                ('nu_mass_ev', np.float)])
                 cosmos_temp = np.zeros(ncosmos, dtype=dt)
                 cosmos_temp['omegab'] = cosmos['ombh2'] / \
@@ -376,7 +376,7 @@ class LPTEmulator(object):
             if not self.use_sigma_8:
                 dt = np.dtype([('ombh2', np.float), ('omch2', np.float),
                                ('w0', np.float), ('ns', np.float),
-                               ('ln10As', np.float), ('H0', np.float),
+                               ('As', np.float), ('H0', np.float),
                                ('nu_mass_ev', np.float)])
                 cosmos_temp = np.zeros(ncosmos, dtype=dt)
                 cosmos_temp['ombh2'] = cosmos['ombh2']
@@ -392,7 +392,7 @@ class LPTEmulator(object):
                 dt = np.dtype([('ombh2', np.float), ('omch2', np.float),
                                ('w0', np.float), ('ns', np.float),
                                ('sigma8', np.float), ('H0', np.float),
-                               ('Neff', np.float)])
+                               ('nu_mass_ev', np.float)])
                 cosmos_temp = np.zeros(ncosmos, dtype=dt)
                 cosmos_temp['ombh2'] = cosmos['ombh2']
                 cosmos_temp['omch2'] = cosmos['omch2']
