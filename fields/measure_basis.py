@@ -423,6 +423,7 @@ def measure_basis_spectra(
                 ),
                 kpkvec,
             )
+        pk_auto_vec = copy(kpkvec)            
     else:
         pk_auto_vec = copy(kpkvec)
 
