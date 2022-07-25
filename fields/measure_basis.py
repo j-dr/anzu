@@ -168,11 +168,11 @@ def advect_fields(configs, lag_field_dict=None):
     # rather than the cb field. Separate this out to save memory.
     if use_neutrinos:
         posvec_nu, _, _, _, m_nu, _ = load_particles(
-            fdir,
             configs["sim_type"],
             rank,
             nranks,
             parttype=2,
+            basedir=fdir,
             boltz=pkclass,
             z_ic=z_ic,
             lbox=configs["lbox"],
@@ -423,6 +423,7 @@ def measure_basis_spectra(
                 ),
                 kpkvec,
             )
+        pk_auto_vec = copy(kpkvec)            
     else:
         pk_auto_vec = copy(kpkvec)
 
@@ -481,7 +482,6 @@ def advect_fields_and_measure_spectra(
         keynames,
         labelvec,
         zbox,
-        lag_field_dict=lag_field_dict,
         field_dict2=field_dict2,
         field_D2=field_D2,
     )
