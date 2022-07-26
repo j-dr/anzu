@@ -341,11 +341,17 @@ class LPTEmulator(object):
 
     def _setup_design(self, cosmofile, param_mean=None, param_mult=None):
 
-        cosmo_file = '/'.join([os.path.dirname(os.path.realpath(__file__)),
-                               'data',
-                               cosmofile])
+        try:
+            cosmo_file = '/'.join([os.path.dirname(os.path.realpath(__file__)),
+                                'data',
+                                cosmofile])
 
-        cosmos = np.genfromtxt(cosmo_file, names=True)
+            cosmos = np.genfromtxt(cosmo_file, names=True)
+        except:
+            cosmo_file = cosmofile
+
+            cosmos = np.genfromtxt(cosmo_file, names=True)
+                        
         ncosmos = len(cosmos)
         self.training_cosmos = cosmos
 
