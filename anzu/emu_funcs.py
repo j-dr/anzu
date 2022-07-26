@@ -190,19 +190,29 @@ class LPTEmulator(object):
         return spectra_out
 
     def _load_data(self):
-
-        aem_file = '/'.join([os.path.dirname(os.path.realpath(__file__)),
-                             'data',
-                             self.nbody_training_data_file])
-        lpt_file = '/'.join([os.path.dirname(os.path.realpath(__file__)),
-                             'data',
-                             self.lpt_training_data_file])
-        k_file = '/'.join([os.path.dirname(os.path.realpath(__file__)),
-                           'data',
-                           self.kbin_file])
-        self.spectra_aem = np.load(aem_file)
-        self.spectra_lpt = np.load(lpt_file)
-        self.k = np.load(k_file)
+        try:
+            aem_file = '/'.join([os.path.dirname(os.path.realpath(__file__)),
+                                'data',
+                                self.nbody_training_data_file])
+            lpt_file = '/'.join([os.path.dirname(os.path.realpath(__file__)),
+                                'data',
+                                self.lpt_training_data_file])
+            k_file = '/'.join([os.path.dirname(os.path.realpath(__file__)),
+                            'data',
+                            self.kbin_file])
+            
+            self.spectra_aem = np.load(aem_file)
+            self.spectra_lpt = np.load(lpt_file)
+            self.k = np.load(k_file)
+            
+        except:
+            aem_file = self.nbody_training_data_file
+            lpt_file = self.lpt_training_data_file
+            k_file = self.kbin_file
+            
+            self.spectra_aem = np.load(aem_file)
+            self.spectra_lpt = np.load(lpt_file)
+            self.k = np.load(k_file)
 
     def _get_pcs(self, evec_spec, spectra, npc):
 
