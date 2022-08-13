@@ -549,14 +549,17 @@ class LPTEmulator(object):
 
             for i in range(self.nspec):
                 kernel = GPy.kern.RBF(
-                    input_dim=len(self.param_mean), variance=1.0, lengthscale=1.0
+                    input_dim=len(self.param_mean), 
+                    variance=self.kern_var[i], 
+                    lengthscale=self.kern_lenscale[i]
                 )
                 surrogate = GPy.models.GPRegression(
                     self.design_scaled.T,
                     np.real(self.pcs_spec_normed[:, i, :]),
                     kernel=kernel,
                 )
-                surrogate.optimize()
+                if self.optimize_kern:
+                    surrogate.optimize()
                 self.surrogates.append(surrogate)
 
         else:
@@ -622,6 +625,27 @@ class LPTEmulator(object):
 
             self.npoly = npoly
             self.qtrunc = qtrunc
+        elif self.surrogate_type == 'GP':
+            if hyperparams is None:
+                self.kern_var = np.ones(self.nspec)
+                self.kern_lenscale = np.ones(self.nspec)
+                self.optimize_kern = True
+            else:
+                if 'kern_var' in hyperparams.keys():
+                    self.kern_var = hyperparams['kern_var']
+                else:
+                    self.kern_var = np.ones(self.nspec)
+                    
+                if 'kern_lenscale' in hyperparams.keys():
+                    self.kern_lenscale = hyperparams['kern_lenscale']
+                else:
+                    self.kern_lenscale = np.ones(self.nspec)
+
+                if 'optimize_kern' in hyperparams.keys():
+                    self.optimize_kern = bool(hyperparams['optimize_kern'])
+                else:
+                    self.optimize_kern = True
+                    
 
         # Pulling all of the measured P(k) into a file
         spectra_aem = np.copy(self.spectra_aem)
