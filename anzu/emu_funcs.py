@@ -521,6 +521,8 @@ class LPTEmulator(object):
 
     def _train_surrogates(self):
 
+        self.surrogates = []
+        
         if self.surrogate_type == "PCE":
 
             distribution = cp.J(
@@ -531,8 +533,6 @@ class LPTEmulator(object):
                     for i in range(8)
                 ]
             )
-
-            self.surrogates = []
 
             # PCE coefficient regression
             for i in range(self.nspec):
@@ -554,7 +554,7 @@ class LPTEmulator(object):
                     lengthscale=self.kern_lenscale[i]
                 )
                 surrogate = GPy.models.GPRegression(
-                    self.design_scaled.T,
+                    self.design_scaled,
                     np.real(self.pcs_spec_normed[:, i, :]),
                     kernel=kernel,
                 )
@@ -896,6 +896,7 @@ class LPTEmulator(object):
             )
 
         # if we already have PCs, just make prediction using them
+
         if lambda_surr is None:
 
             # otherwise, check to see if we have PC vecs and spectra, in which case
@@ -910,6 +911,7 @@ class LPTEmulator(object):
 
                 lambda_surr = self._get_pcs(evec_spec, simoverlpt, self.npc)
                 lambda_surr_normed = None
+                simoverlpt_var = np.zeros_like(lambda_surr)
 
             # otherwise just use the surrogates to compute PCs
             else:
@@ -938,9 +940,10 @@ class LPTEmulator(object):
 
                 lambda_surr = unnorm(lambda_surr_normed, self.pcs_mean, self.pcs_mult)
                 lambda_var = unnorm(lambda_var_normed, self.pcs_mean, self.pcs_mult)
-
+                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs, lambda_var)
+                
         simoverlpt_emu = np.einsum("bkp, cbp->cbk", evecs, lambda_surr)
-        simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs, lambda_var)
+
 
         if self.extrap:
             # Extrap and rebin.
@@ -954,11 +957,12 @@ class LPTEmulator(object):
             pk_emu[..., k > self.kmin] = (10 ** (simoverlpt_emu) * pk_emu)[
                 ..., k > self.kmin
             ]
-        else:
-            pk_emu[...] = 10 ** (simoverlpt_emu) * pk_emu[...]
             var_emu[..., k > self.kmin] = (10 ** (simoverlpt_var) * spectra_lpt)[
                 ..., k > self.kmin
-            ]
+            ]            
+        else:
+            pk_emu[...] = 10 ** (simoverlpt_emu) * pk_emu[...]
+            var_emu[...] = (10 ** (simoverlpt_var) * spectra_lpt)
 
         return pk_emu, lambda_surr, var_emu
 
