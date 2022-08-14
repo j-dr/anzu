@@ -602,6 +602,11 @@ class LPTEmulator(object):
             self.npc = hyperparams["npc"]
             ncv = hyperparams["ncv"]
             self.ncv = ncv
+            
+            if 'degree_cv' in hyperparams:
+                self.degree_cv = hyperparams['degree_cv']
+            else:
+                self.degree_cv = None
 
         if self.surrogate_type == "PCE":
             if hyperparams is None:
@@ -653,10 +658,12 @@ class LPTEmulator(object):
 
         if ncv is None:
             self.degree_cv = 0
+        elif self.degree_cv:
+            spectra_aem = spectra_aem[ncv:self.degree_cv+ncv]
+            spectra_lpt = spectra_lpt[ncv:self.degree_cv+ncv]
         else:
-            self.degree_cv = 1
             spectra_aem = spectra_aem[np.arange(len(spectra_aem)) != ncv]
-            spectra_lpt = spectra_lpt[np.arange(len(spectra_lpt)) != ncv]
+            spectra_lpt = spectra_lpt[np.arange(len(spectra_lpt)) != ncv]            
 
         self._setup_training_data(spectra_lpt, spectra_aem)
         self.design, self.design_scaled = self._setup_design(self.training_cosmo_file)
@@ -940,7 +947,7 @@ class LPTEmulator(object):
                         print("took {}s".format(end - start))
 
                 lambda_surr = unnorm(lambda_surr_normed, self.pcs_mean, self.pcs_mult)
-                lambda_var = unnorm(lambda_var_normed, self.pcs_mean, self.pcs_mult)
+                lambda_var = unnorm(lambda_var_normed, self.pcs_mean, self.pcs_mult**2)
                 simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)
                 
         simoverlpt_emu = np.einsum("bkp, cbp->cbk", evecs, lambda_surr)
