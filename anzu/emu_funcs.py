@@ -911,7 +911,8 @@ class LPTEmulator(object):
 
                 lambda_surr = self._get_pcs(evec_spec, simoverlpt, self.npc)
                 lambda_surr_normed = None
-                simoverlpt_var = np.zeros_like(lambda_surr)
+                lambda_var = np.zeros_like(lambda_surr)
+                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)                
 
             # otherwise just use the surrogates to compute PCs
             else:
@@ -940,7 +941,7 @@ class LPTEmulator(object):
 
                 lambda_surr = unnorm(lambda_surr_normed, self.pcs_mean, self.pcs_mult)
                 lambda_var = unnorm(lambda_var_normed, self.pcs_mean, self.pcs_mult)
-                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs, lambda_var)
+                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)
                 
         simoverlpt_emu = np.einsum("bkp, cbp->cbk", evecs, lambda_surr)
 
@@ -957,12 +958,12 @@ class LPTEmulator(object):
             pk_emu[..., k > self.kmin] = (10 ** (simoverlpt_emu) * pk_emu)[
                 ..., k > self.kmin
             ]
-            var_emu[..., k > self.kmin] = (10 ** (simoverlpt_var) * spectra_lpt)[
+            var_emu[..., k > self.kmin] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[
                 ..., k > self.kmin
-            ]            
+            ]
         else:
             pk_emu[...] = 10 ** (simoverlpt_emu) * pk_emu[...]
-            var_emu[...] = (10 ** (simoverlpt_var) * spectra_lpt)
+            var_emu[...] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[...]
 
         return pk_emu, lambda_surr, var_emu
 
