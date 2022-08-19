@@ -493,12 +493,17 @@ class LPTEmulator(object):
         zidx = np.min(np.where(self.zs <= self.zmax))
         z = self.zs[zidx:]
         a = 1 / (1 + z)
+        
+        if self.degree_cv < 2:
+            idx = np.arange(ncosmos) != self.ncv
+        else:
+            idx = (np.arange(ncosmos) < self.ncv) & (self.ncv + self.degree_cv < np.arange(ncosmos))
 
         if self.usez:
             design = np.hstack(
                 [
                     np.tile(cosmos.view(("<f8", 7)), self.nz)[
-                        np.arange(ncosmos) != self.ncv
+                        idx
                     ].reshape(self.nz * (ncosmos - self.degree_cv), 7),
                     np.tile(z, ncosmos - self.degree_cv)[:, np.newaxis],
                 ]
@@ -507,7 +512,7 @@ class LPTEmulator(object):
             design = np.hstack(
                 [
                     np.tile(cosmos.view(("<f8", 7)), self.nz)[
-                        np.arange(ncosmos) != self.ncv
+                        idx
                     ].reshape(self.nz * (ncosmos - self.degree_cv), 7),
                     np.tile(a, ncosmos - self.degree_cv)[:, np.newaxis],
                 ]
@@ -598,6 +603,7 @@ class LPTEmulator(object):
             self.npc = 2
             ncv = None
             self.ncv = ncv
+            self.degree_cv = 0
         else:
             self.npc = hyperparams["npc"]
             ncv = hyperparams["ncv"]
@@ -655,15 +661,15 @@ class LPTEmulator(object):
         # Pulling all of the measured P(k) into a file
         spectra_aem = np.copy(self.spectra_aem)
         spectra_lpt = np.copy(self.spectra_lpt)
-
-        if ncv is None:
-            self.degree_cv = 0
-        elif self.degree_cv:
-            spectra_aem = spectra_aem[ncv:self.degree_cv+ncv]
-            spectra_lpt = spectra_lpt[ncv:self.degree_cv+ncv]
+        ncosmos = spectra_aem.shape[0]
+        
+        if self.degree_cv < 2:
+            idx = np.arange(ncosmos) != self.ncv
         else:
-            spectra_aem = spectra_aem[np.arange(len(spectra_aem)) != ncv]
-            spectra_lpt = spectra_lpt[np.arange(len(spectra_lpt)) != ncv]            
+            idx = (np.arange(ncosmos) < self.ncv) & (self.ncv + self.degree_cv < np.arange(ncosmos))
+
+        spectra_aem = spectra_aem[idx]
+        spectra_lpt = spectra_lpt[idx]
 
         self._setup_training_data(spectra_lpt, spectra_aem)
         self.design, self.design_scaled = self._setup_design(self.training_cosmo_file)

@@ -236,11 +236,14 @@ def load_particles(
 
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)
-    f = boltz.scale_independent_growth_factor_f(z_this)
     Ha = boltz.Hubble(z_this) * 299792.458
-
+    
     if rsd:
-        v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()  # (v_p = v_gad * a^(1/2))
+        boltz.scale_independent_growth_factor_f(z_this)
+        v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()  # (v_p = v_gad * a^(1/2))        
+    else:
+        f = 0
+        v_fac = 0
 
     if not cv_surrogate:
         npart_counter = 0
@@ -313,11 +316,11 @@ def load_particles(
                     (grid[1] / nmesh + D * ics["DM_dy_filt"][rank::size, ...]) % 1
                 ) * lbox
                 pos_z = (
-                    (grid[2] / nmesh + D * ics["DM_dz_filt"][rank::size, ...]) % 1
+                    (grid[2] / nmesh + D * (1 + f) * ics["DM_dz_filt"][rank::size, ...]) % 1
                 ) * lbox
-                if rsd:
-                    pos_z += f * D * ics["DM_dz_filt"][rank::size, ...] * lbox
-                    pos_z %= lbox
+#                if rsd:
+#                    pos_z += f * D * ics["DM_dz_filt"][rank::size, ...] * lbox
+#                    pos_z %= lbox
                 pos = np.stack([pos_x, pos_y, pos_z])
                 pos = pos.reshape(3, -1).T
                 del pos_x, pos_y, pos_z

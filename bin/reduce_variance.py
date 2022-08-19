@@ -60,7 +60,7 @@ def _lpt_pk(k, p_lin, D=None, cleftobj=None, kecleft=False, zenbu=True, cutoff=n
         cleftpk = cleftobj.pktable.T
         
     elif zenbu:
-        zobj = Zenbu(k, p_lin, cutoff=cutoff)
+        zobj = Zenbu(k, p_lin, cutoff=cutoff, N=3000, jn=15)
         zobj.make_ptable()
         cleftpk = zobj.pktable.T
         
@@ -303,9 +303,10 @@ def lpt_spectra(k, z, anzu_config, kin, p_lin_in, pkclass=None):
 
     Dthis = pkclass.scale_independent_growth_factor(z)
     Dic = pkclass.scale_independent_growth_factor(cfg['z_ic'])
-    plin = np.exp(interp1d(np.log(kin), np.log(p_lin_in), fill_value='extrapolate')(np.log(kt)))    
+#    plin = np.exp(interp1d(np.log(kin), np.log(p_lin_in), fill_value='extrapolate')(np.log(kt))) * np.exp(-kt**2/(cutoff**2))
+#    plin = np.exp(interp1d(np.log(kin), np.log(p_lin_in), fill_value='extrapolate')(np.log(kt)))    
     
-    zbspline, cleftobj = _lpt_pk(kt, plin*(Dthis/Dic)**2, cutoff=cutoff)
+    zbspline, cleftobj = _lpt_pk(kin, p_lin_in*(Dthis/Dic)**2, cutoff=cutoff)
 
     cleft_m_spline, cleftobj = _cleft_pk(kt, pk_m_lin, kecleft=False)
     cleft_cb_spline, cleftobj = _cleft_pk(kt, pk_cb_lin_zb, kecleft=False)
@@ -320,7 +321,7 @@ def lpt_spectra(k, z, anzu_config, kin, p_lin_in, pkclass=None):
 def reduce_variance(k, pk_ij_nn, pk_ij_zn, pk_ij_zz, anzu_config, z, kt, p_lin_in, neutrinos=True, pkclass=None):
 
     pk_ij_zenbu, pk_m_3lpt, pk_cb_3lpt, pkclass = lpt_spectra(k, z, anzu_config, kt, p_lin_in, pkclass=pkclass)
-    pk_ij_nn_hat, beta_ij, beta_ij_damp, pk_ij_zz_l, pk_ij_zenbu_l, pk_ij_zn_l, pk_ij_nz_l = compute_beta_and_reduce_variance(k, pk_ij_nn, pk_ij_zn, pk_ij_zz, pk_ij_zenbu, neutrinos=neutrinos, k0=0.618, dk=0.167)    
+    pk_ij_nn_hat, beta_ij, beta_ij_damp, pk_ij_zz_l, pk_ij_zenbu_l, pk_ij_zn_l, pk_ij_nz_l = compute_beta_and_reduce_variance(k, pk_ij_nn, pk_ij_zn, pk_ij_zz, pk_ij_zenbu, neutrinos=neutrinos, k0=0.618, dk=0.167)#k0=0.1, dk=0.167)    
 
     return pk_ij_nn_hat, beta_ij, beta_ij_damp, pk_ij_zz_l, pk_ij_zenbu_l, pk_ij_zn_l, pk_ij_nz_l, pk_m_3lpt, pk_cb_3lpt, pkclass
 
@@ -381,11 +382,12 @@ if __name__ == '__main__':
                 pk_ij_3lpt[j, s, :] = pk_cb_3lpt[s_cb_map[s]]
 
 
-    np.save('{}/pk_ij_nn_hat.npy'.format(basename), pk_ij_hat)
-    np.save('{}/pk_ij_zz.npy'.format(basename), pk_ij_zz_all)
-    np.save('{}/pk_ij_nn.npy'.format(basename), pk_ij_nn_all)
-    np.save('{}/pk_ij_zn.npy'.format(basename), pk_ij_zn_all)
-    np.save('{}/pk_ij_nz.npy'.format(basename), pk_ij_nz_all)
-    np.save('{}/beta_ij.npy'.format(basename), beta_ij_all)
-    np.save('{}/pk_ij_zenbu.npy'.format(basename), beta_ij_all)
-    np.save('{}/pk_ij_3lpt.npy'.format(basename), pk_ij_3lpt)
+    np.save('{}/pk_ij_nn_hat_noexp_damp.npy'.format(basename), pk_ij_hat)
+    np.save('{}/pk_ij_zz_noexp_damp.npy'.format(basename), pk_ij_zz_all)
+    np.save('{}/pk_ij_nn_noexp_damp.npy'.format(basename), pk_ij_nn_all)
+    np.save('{}/pk_ij_zn_noexp_damp.npy'.format(basename), pk_ij_zn_all)
+    np.save('{}/pk_ij_nz_noexp_damp.npy'.format(basename), pk_ij_nz_all)
+    np.save('{}/beta_ij_noexp_damp.npy'.format(basename), beta_ij_all)
+    np.save('{}/pk_ij_zenbu_noexp_damp.npy'.format(basename), pk_ij_zenbu)
+    np.save('{}/pk_ij_3lpt_noexp_damp.npy'.format(basename), pk_ij_3lpt)
+
