@@ -122,10 +122,16 @@ if __name__ == "__main__":
         config_surr["rsd"] = True
 
         for i in range(nsnaps):
-            if (not do_rs) & (i < start_snapnum):
+            if (not do_rsd) | (i < start_snapnum):
                 continue
             if rank == 0:
                 print("Processing snapshot {}".format(i), flush=True)
+
+            if scale_dependent_growth:
+                z = get_snap_z(pdirs[i], config["sim_type"])
+                lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
+            else:
+                lag_field_dict = None
 
             config["particledir"] = pdirs[i]
             field_dict, field_D, _, _, _ = advect_fields_and_measure_spectra(

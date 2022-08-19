@@ -239,7 +239,7 @@ def load_particles(
     Ha = boltz.Hubble(z_this) * 299792.458
     
     if rsd:
-        boltz.scale_independent_growth_factor_f(z_this)
+        f = boltz.scale_independent_growth_factor_f(z_this)
         v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()  # (v_p = v_gad * a^(1/2))        
     else:
         f = 0
@@ -363,9 +363,10 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
         mode = "1d"
         Nmu = 1
     else:
-        Nmu = 100
-        mu_edges = np.linspace(0, 1, Nmu)
-        edges = (k_edges, mu_edges)
+#        Nmu = 100
+#        mu_edges = np.linspace(0, 1, Nmu)
+#        edges = (k_edges, mu_edges)
+        edges = k_edges
         poles = (0, 2, 4)
         mode = "2d"
 
