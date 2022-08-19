@@ -336,10 +336,7 @@ class LPTEmulator(object):
         # Non mean-subtracted PCs
         Xs = np.zeros((self.nspec, self.nk, self.nk))
         for i in range(self.nspec):
-            Xs[i, :, :] = np.dot(
-                simoverlpt[:, :, i, :].reshape(self.nz * (nsim), -1).T,
-                simoverlpt[:, :, i, :].reshape(self.nz * (nsim), -1),
-            )
+            Xs[i, :, :] = np.cov(self.simoverlpt[:, :, i, :].reshape(self.nz * nsim, -1).T)
 
         # PC basis for each type of spectrum, independent of z and cosmo
         evec_spec = np.zeros((self.nspec, self.nk, self.nk))
@@ -499,6 +496,14 @@ class LPTEmulator(object):
         else:
             idx = (np.arange(ncosmos) < self.ncv) & (self.ncv + self.degree_cv < np.arange(ncosmos))
 
+        if self.degree_cv<2:
+            idx = np.arange(ncosmos) != self.ncv
+        else:
+            if self.ncv is not None:
+                idx = (np.arange(ncosmos) < self.ncv) | (np.arange(ncosmos) >= self.degree_cv + ncv)
+            else:
+                idx = (np.arange(ncosmos) >= self.degree_cv)
+            
         if self.usez:
             design = np.hstack(
                 [
@@ -553,19 +558,31 @@ class LPTEmulator(object):
         elif self.surrogate_type == "GP":
 
             for i in range(self.nspec):
-                kernel = GPy.kern.RBF(
-                    input_dim=len(self.param_mean), 
-                    variance=self.kern_var[i], 
-                    lengthscale=self.kern_lenscale[i]
-                )
-                surrogate = GPy.models.GPRegression(
-                    self.design_scaled,
-                    np.real(self.pcs_spec_normed[:, i, :]),
-                    kernel=kernel,
-                )
-                if self.optimize_kern:
-                    surrogate.optimize()
-                self.surrogates.append(surrogate)
+                print('fitting spec {}'.format(i),flush=True)
+                if self.independent_pcs:
+                    self.surrogates.append([])
+                    for j in range(self.npc):
+                        print('fitting pc {}'.format(j), flush=True)
+                        K = GPy.kern.Matern32(input_dim=len(self.param_mean)) + GPy.kern.White(1)
+                        m = GPy.models.GPRegression(self.design_scaled,
+                                                    np.real(self.pcs_spec[:, i, j, np.newaxis]),
+                                                    normalizer=None,
+                                                    kernel=K)
+
+                        if self.optimize_kern:
+                            m.optimize(optimizer='bfgs')
+                        self.surrogates[i].append(m)
+                else:
+                    K = GPy.kern.RBF(input_dim=len(self.param_mean),
+                                          variance=self.kern_var[i],
+                                          lengthscale=self.kern_lenscale[i])
+                    m = GPy.models.GPRegression(self.design_scaled,
+                                                np.real(self.pcs_spec[:, i, :]),
+                                                kernel=K)
+
+                    if self.optimize_kern:
+                        m.optimize('bfgs')
+                    self.surrogates.append(m)
 
         else:
 
@@ -614,6 +631,11 @@ class LPTEmulator(object):
             else:
                 self.degree_cv = None
 
+            if 'independent_pcs' in hyperparams:
+                self.independent_pcs = hyperparams['independent_pcs']
+            else:
+                self.independent_pcs = True
+                
         if self.surrogate_type == "PCE":
             if hyperparams is None:
                 npoly = np.array([1, 2, 1, 1, 3, 2, 1, 3])
@@ -666,7 +688,11 @@ class LPTEmulator(object):
         if self.degree_cv < 2:
             idx = np.arange(ncosmos) != self.ncv
         else:
-            idx = (np.arange(ncosmos) < self.ncv) & (self.ncv + self.degree_cv < np.arange(ncosmos))
+            if self.ncv is not None:
+                idx = (np.arange(ncosmos) < self.ncv) | (np.arange(ncosmos) >= self.degree_cv + ncv)
+            else:
+                idx = (np.arange(ncosmos) >= self.degree_cv)
+        
 
         spectra_aem = spectra_aem[idx]
         spectra_lpt = spectra_lpt[idx]
@@ -941,18 +967,26 @@ class LPTEmulator(object):
                         ).T
 
                     elif self.surrogate_type == "GP":
-
-                        (
-                            lambda_surr_normed[:, i, ...],
-                            lambda_var_normed[:, i, ...],
-                        ) = self.surrogates[i].predict(cosmo_scaled)
+                        if self.independent_pcs:
+                            for j in range(self.npc):
+                                m, v = self.surrogates[i][j].predict(cosmo_scaled)
+                                lambda_surr_normed[:, i, j] = m[:,0]
+                                lambda_var_normed[:, i, j] = v[:,0]
+                        else:
+                            (
+                                lambda_surr_normed[:, i, ...],
+                                lambda_var_normed[:, i, ...],
+                            ) = self.surrogates[i].predict(cosmo_scaled)
 
                     end = time.time()
 
                     if timing:
                         print("took {}s".format(end - start))
 
-                lambda_surr = unnorm(lambda_surr_normed, self.pcs_mean, self.pcs_mult)
+                if self.surrogate_type == 'PCE':
+                    lambda_surr = unnorm(lambda_surr_normed, self.pcs_mean, self.pcs_mult)
+                else:
+                    lambda_surr = lambda_surr_normed
                 lambda_var = unnorm(lambda_var_normed, self.pcs_mean, self.pcs_mult**2)
                 simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)
                 
