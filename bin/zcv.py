@@ -243,9 +243,14 @@ if __name__ == "__main__":
         save=False
     )
     
+    if linear_surrogate:
+        stype = 'l'
+    else:
+        stype = 'z'
+        
     np.save(
         lindir
-        + "zcv_surrogate_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
+        + "{}cv_surrogate_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
             config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
         ),
         pk_auto_vec,
@@ -261,7 +266,7 @@ if __name__ == "__main__":
     
     np.save(
         lindir
-        + "zcv_cross_{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
+        + "{}cv_cross_{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
             tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
         ),
         pk_cross_vec,
