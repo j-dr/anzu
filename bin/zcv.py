@@ -115,7 +115,10 @@ def get_linear_field(config, lag_field_dict, rank, size, nmesh):
     grid[2] *= Lbox / nmesh
 
     meshpos = np.vstack([grid[0].flatten(), grid[1].flatten(), grid[2].flatten()]).T
-
+    #if rank==0:
+    #    print('meshpos.shape: {}'.format(meshpos.shape))
+    #    print('meshpos.shape: {}'.format(delta.flatten().shape))
+        
     layout = pm.decompose(meshpos)
     p = layout.exchange(meshpos)
     d = layout.exchange(delta.flatten())
@@ -153,8 +156,9 @@ def real_to_redshift_space(field, nmesh, lbox, rank, nranks, f, fft=None):
     del kx, ky, kz, mu
         
     field_k_rsd = field_k * rsdfac
+    field_rsd = fft.backward(field_k_rsd)
 
-    return field_k_rsd
+    return field_rsd
 
 if __name__ == "__main__":
     
