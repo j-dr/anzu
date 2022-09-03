@@ -204,7 +204,9 @@ if __name__ == "__main__":
         )        
         lag_field_dict['delta'] = arr[np.arange(rank, nmesh, size), :, :]
         keynames = ['delta']
-        labelvec = ['delta']        
+        labelvec = ['delta']
+    else:
+        lag_field_dict = None    
         
     #advect ZA fields
     if not linear_surrogate:
