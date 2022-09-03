@@ -275,19 +275,20 @@ if __name__ == "__main__":
         ),
         pk_cross_vec,
     )        
-    
-    if bias_vec is None:
-        if field_level_bias:
-            bias_vec, M, A = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
-        else:
-            k, mu, pk_tt_wedge_array, pk_tt_pole_array = pk_list_to_vec([pk_tt_dict])
-            k, mu, pk_ij_wedge_array, pk_ij_pole_array = pk_list_to_vec(pk_auto_vec)
 
-            if config['rsd']:
-                bias_vec = measure_2pt_bias(k, pk_ij_pole_array, pk_tt_pole_array[0,...], kmax)
+    if not linear_surrogate:    
+        if bias_vec is None:
+            if field_level_bias:
+                bias_vec, M, A = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
             else:
-                bias_vec = measure_2pt_bias(k, pk_ij_wedge_array, pk_tt_wedge_array[0,...], kmax)
+                k, mu, pk_tt_wedge_array, pk_tt_pole_array = pk_list_to_vec([pk_tt_dict])
+                k, mu, pk_ij_wedge_array, pk_ij_pole_array = pk_list_to_vec(pk_auto_vec)
+
+                if config['rsd']:
+                    bias_vec = measure_2pt_bias(k, pk_ij_pole_array, pk_tt_pole_array[0,...], kmax)
+                else:
+                    bias_vec = measure_2pt_bias(k, pk_ij_wedge_array, pk_tt_wedge_array[0,...], kmax)
+                    
                 
-            
 
 
