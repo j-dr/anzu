@@ -4,16 +4,31 @@ from fields.make_lagfields import make_lagfields
 from fields.measure_basis import advect_fields, measure_basis_spectra
 from fields.common_functions import get_snap_z, measure_pk
 from fields.field_level_bias import measure_field_level_bias
+from mpi4py_fft import PFFT
 from anzu.utils import combine_real_space_spectra, combine_measured_rsd_spectra
 from scipy.optimize import minimize
 from scipy.interpolate import interp1d
+from classy import Class
 from mpi4py import MPI
+import pmesh
 from copy import copy
 from glob import glob
 from yaml import Loader
 import sys, yaml
 import h5py
 import gc
+
+def CompensateCICAliasing(w, v):
+    """
+    Return the Fourier-space kernel that accounts for the convolution of
+        the gridded field with the CIC window function in configuration space,
+            as well as the approximate aliasing correction
+    From the nbodykit documentation.
+    """
+    for i in range(3):
+        wi = w[i]
+        v = v / (1 - 2.0 / 3 * np.sin(0.5 * wi) ** 2) ** 0.5
+    return v
 
 
 def pk_list_to_vec(pk_ij_list):
@@ -74,6 +89,73 @@ def measure_2pt_bias(k, pk_ij_heft, pk_tt, kmax, rsd=False):
     
     return out
 
+def get_linear_field(config, lag_field_dict, rank, size, nmesh):
+    
+    boltz = Class()
+    boltz.set(config["Cosmology"])
+    boltz.compute()
+    z_ic = config["z_ic"]        
+    z_this = get_snap_z(config["particledir"], config["sim_type"])
+    D = boltz.scale_independent_growth_factor(z_this)
+    D = D / boltz.scale_independent_growth_factor(z_ic)        
+    f = D / boltz.scale_independent_growth_factor_f(z_this)        
+
+    if config['rsd']:
+        delta = real_to_redshift_space(lag_field_dict['delta'], nmesh, Lbox, rank, size, f)
+        
+    grid = np.meshgrid(
+        np.arange(rank, nmesh, size, dtype=np.float32),
+        np.arange(nmesh, dtype=np.float32),
+        np.arange(nmesh, dtype=np.float32),
+        indexing="ij"
+    )
+
+    grid[0] *= Lbox / nmesh
+    grid[1] *= Lbox / nmesh
+    grid[2] *= Lbox / nmesh
+
+    meshpos = np.vstack([grid[0].flatten(), grid[1].flatten(), grid[2].flatten()]).T
+
+    layout = pm.decompose(meshpos)
+    p = layout.exchange(meshpos)
+    d = layout.exchange(delta.flatten())
+
+    mesh = pm.paint(p, mass=d)
+    del p, d, meshpos
+    
+    mesh = mesh.r2c()
+    mesh = mesh.apply(CompensateCICAliasing, kind='circular')    
+    field_dict = {'delta':mesh}
+    field_D = [D]
+    
+    return field_dict, field_D, z_this
+
+def real_to_redshift_space(field, nmesh, lbox, rank, nranks, f, fft=None):
+    
+    if fft is None:
+        N = np.array([nmesh, nmesh, nmesh], dtype=int)
+        fft = PFFT(MPI.COMM_WORLD, N, axes=(0, 1, 2), dtype="float32", grid=(-1,))
+
+    field_k = fft.forward(field)
+
+    kvals = np.fft.fftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
+    kvalsmpi = kvals[rank * nmesh // nranks : (rank + 1) * nmesh // nranks]
+    kvalsr = np.fft.rfftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
+
+    kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
+    knorm = kx ** 2 + ky ** 2 + kz ** 2
+    mu = kz / np.sqrt(knorm)
+    
+    if knorm[0][0][0] == 0:
+        knorm[0][0][0] = 1
+        mu[0][0][0] = 0
+    rsdfac = 1 + f * mu**2
+    del kx, ky, kz, mu
+        
+    field_k_rsd = field_k * rsdfac
+
+    return field_k_rsd
+
 if __name__ == "__main__":
     
     comm = MPI.COMM_WORLD
@@ -94,8 +176,9 @@ if __name__ == "__main__":
     kmax = np.atleast_1d(config['field_level_kmax'])
     nmesh = int(config['nmesh_out'])
     Lbox = float(config['lbox'])    
+    linear_surrogate = config.get('linear_surrogate', False)
     basename = "mpi_icfields_nmesh_filt"
-    
+
     if 'bias_vec' in config:
         bias_vec = config['bias_vec']
     else:
@@ -109,13 +192,25 @@ if __name__ == "__main__":
     linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
     if len(linfields)==0:
         lag_field_dict = make_lagfields(config, save_to_disk=True)
-    else:
-        lag_field_dict = None
+    elif linear_surrogate:
+        lag_field_dict = {}
+        arr = np.load(
+            lindir + "{}_{}_{}_np.npy".format(basename, nmesh, 'delta'),
+            mmap_mode="r",
+        )        
+        lag_field_dict['delta'] = arr
+        keynames = ['delta']
+        labelvec = ['delta']        
         
     #advect ZA fields
-    pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(config, lag_field_dict=lag_field_dict)
-
-    # load tracers and deposit onto mesh. 
+    if not linear_surrogate:
+        pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(config, lag_field_dict=lag_field_dict)
+    else:
+        pm = pmesh.pm.ParticleMesh(
+            [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
+        )
+        field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh)
+    # load tracers and deposit onto mesh.
     # TODO: generalize to accept different formats
     
     if config['rsd']:
@@ -128,7 +223,7 @@ if __name__ == "__main__":
     tracerfield = pm.paint(p, mass=1, resampler="cic")
     tracerfield = tracerfield / tracerfield.cmean() - 1
     tracerfield = tracerfield.r2c()
-    del tracer_pos, p                
+    del tracer_pos, p
         
     #measure tracer auto-power
     pk_tt_dict = measure_pk(tracerfield, tracerfield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
