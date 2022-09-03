@@ -198,7 +198,7 @@ if __name__ == "__main__":
             lindir + "{}_{}_{}_np.npy".format(basename, nmesh, 'delta'),
             mmap_mode="r",
         )        
-        lag_field_dict['delta'] = arr
+        lag_field_dict['delta'] = arr[rank * nmesh // size : (rank + 1) * nmesh // size, :, :]
         keynames = ['delta']
         labelvec = ['delta']        
         
