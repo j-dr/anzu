@@ -74,7 +74,7 @@ def pk_list_to_vec(pk_ij_list):
 def measure_2pt_bias(k, pk_ij_heft, pk_tt, kmax, rsd=False):
     
     kidx = k.searchsorted(kmax)
-    kcut = k[:kidx]
+    kcut = k[:kidx[0]]
     pk_tt_kcut = pk_tt[:kidx]
     pk_ij_heft_kcut = pk_ij_heft[:,...,:kidx,np.newaxis]
     
@@ -98,7 +98,7 @@ def get_linear_field(config, lag_field_dict, rank, size, nmesh):
     z_this = get_snap_z(config["particledir"], config["sim_type"])
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)        
-    f = D / boltz.scale_independent_growth_factor_f(z_this)        
+    f = boltz.scale_independent_growth_factor_f(z_this)        
 
     if config['rsd']:
         delta = real_to_redshift_space(lag_field_dict['delta'], nmesh, Lbox, rank, size, f)
@@ -115,9 +115,6 @@ def get_linear_field(config, lag_field_dict, rank, size, nmesh):
     grid[2] *= Lbox / nmesh
 
     meshpos = np.vstack([grid[0].flatten(), grid[1].flatten(), grid[2].flatten()]).T
-    #if rank==0:
-    #    print('meshpos.shape: {}'.format(meshpos.shape))
-    #    print('meshpos.shape: {}'.format(delta.flatten().shape))
         
     layout = pm.decompose(meshpos)
     p = layout.exchange(meshpos)
