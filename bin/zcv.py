@@ -188,6 +188,8 @@ if __name__ == "__main__":
         M_file = config.get('field_level_M', None)
         if M_file:
             M = np.load(M_file)
+        else:
+            M = None
     
     #create/load surrogate linear fields
     linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
