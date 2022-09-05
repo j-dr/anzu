@@ -124,7 +124,7 @@ def get_linear_field(config, lag_field_dict, rank, size, nmesh):
     del p, d, meshpos
     
     mesh = mesh.r2c()
-    mesh = mesh.apply(CompensateCICAliasing, kind='circular')    
+#    mesh = mesh.apply(CompensateCICAliasing, kind='circular')    
     field_dict = {'delta':mesh}
     field_D = [D]
     
@@ -228,6 +228,7 @@ if __name__ == "__main__":
     tracerfield = pm.paint(p, mass=1, resampler="cic")
     tracerfield = tracerfield / tracerfield.cmean() - 1
     tracerfield = tracerfield.r2c()
+    tracerfield.apply(CompensateCICAliasing, kind='circular')
     del tracer_pos, p
         
     #measure tracer auto-power
