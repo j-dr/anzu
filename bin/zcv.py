@@ -89,7 +89,7 @@ def measure_2pt_bias(k, pk_ij_heft, pk_tt, kmax, rsd=False):
     
     return out
 
-def get_linear_field(config, lag_field_dict, rank, size, nmesh):
+def get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=None):
     
     boltz = Class()
     boltz.set(config["Cosmology"])
@@ -98,10 +98,15 @@ def get_linear_field(config, lag_field_dict, rank, size, nmesh):
     z_this = get_snap_z(config["particledir"], config["sim_type"])
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)        
-    f = boltz.scale_independent_growth_factor_f(z_this)        
+    f = boltz.scale_independent_growth_factor_f(z_this)
+
+    if bias_vec is not None:
+        b = bias_vec[0]
+    else:
+        b = 1
 
     if config['rsd']:
-        delta = real_to_redshift_space(lag_field_dict['delta'], nmesh, Lbox, rank, size, f)
+        delta = real_to_redshift_space(lag_field_dict['delta'], nmesh, Lbox, rank, size, f, b=b)
         
     grid = np.meshgrid(
         np.arange(rank, nmesh, size, dtype=np.float32),
@@ -130,7 +135,7 @@ def get_linear_field(config, lag_field_dict, rank, size, nmesh):
     
     return field_dict, field_D, z_this
 
-def real_to_redshift_space(field, nmesh, lbox, rank, nranks, f, fft=None):
+def real_to_redshift_space(field, nmesh, lbox, rank, nranks, f, fft=None, b=1):
     
     if fft is None:
         N = np.array([nmesh, nmesh, nmesh], dtype=int)
@@ -149,7 +154,7 @@ def real_to_redshift_space(field, nmesh, lbox, rank, nranks, f, fft=None):
     if knorm[0][0][0] == 0:
         knorm[0][0][0] = 1
         mu[0][0][0] = 0
-    rsdfac = 1 + f * mu**2
+    rsdfac = b + f * mu**2
     del kx, ky, kz, mu
         
     field_k_rsd = field_k * rsdfac
@@ -214,7 +219,7 @@ if __name__ == "__main__":
         pm = pmesh.pm.ParticleMesh(
             [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
         )
-        field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh)
+        field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec)
     # load tracers and deposit onto mesh.
     # TODO: generalize to accept different formats
     
