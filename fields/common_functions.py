@@ -318,9 +318,7 @@ def load_particles(
                 pos_z = (
                     (grid[2] / nmesh + D * (1 + f) * ics["DM_dz_filt"][rank::size, ...]) % 1
                 ) * lbox
-#                if rsd:
-#                    pos_z += f * D * ics["DM_dz_filt"][rank::size, ...] * lbox
-#                    pos_z %= lbox
+
                 pos = np.stack([pos_x, pos_y, pos_z])
                 pos = pos.reshape(3, -1).T
                 del pos_x, pos_y, pos_z
@@ -363,9 +361,6 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
         mode = "1d"
         Nmu = 1
     else:
-#        Nmu = 100
-#        mu_edges = np.linspace(0, 1, Nmu)
-#        edges = (k_edges, mu_edges)
         edges = k_edges
         poles = (0, 2, 4)
         mode = "2d"

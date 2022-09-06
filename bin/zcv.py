@@ -106,30 +106,35 @@ def get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=None):
         b = 1
 
     if config['rsd']:
-        delta = real_to_redshift_space(lag_field_dict['delta'], nmesh, Lbox, rank, size, f, b=b)
-        
+        delta, fft = real_to_redshift_space(lag_field_dict['delta'], nmesh, Lbox, rank, size, f, b=b)
+
     grid = np.meshgrid(
-        np.arange(rank, nmesh, size, dtype=np.float32),
-        np.arange(nmesh, dtype=np.float32),
-        np.arange(nmesh, dtype=np.float32),
-        indexing="ij"
+        np.arange(nmesh)[rank * nmesh // size : (rank + 1) * nmesh // size],
+        np.arange(nmesh),
+        np.arange(nmesh),
+        indexing="ij",
     )
-
-    grid[0] *= Lbox / nmesh
-    grid[1] *= Lbox / nmesh
-    grid[2] *= Lbox / nmesh
-
-    meshpos = np.vstack([grid[0].flatten(), grid[1].flatten(), grid[2].flatten()]).T
+    pos_x = (
+        (grid[0] / nmesh) % 1
+    ) * Lbox
+    pos_y = (
+        (grid[1] / nmesh) % 1
+    ) * Lbox
+    pos_z = (
+        (grid[2] / nmesh) % 1
+    ) * Lbox
+    pos = np.stack([pos_x, pos_y, pos_z])
+    pos = pos.reshape(3, -1).T
+    del pos_x, pos_y, pos_z
         
-    layout = pm.decompose(meshpos)
-    p = layout.exchange(meshpos)
+    layout = pm.decompose(pos)
+    p = layout.exchange(pos)
     d = layout.exchange(delta.flatten())
 
     mesh = pm.paint(p, mass=d)
-    del p, d, meshpos
-    
-    mesh = mesh.r2c()
-#    mesh = mesh.apply(CompensateCICAliasing, kind='circular')    
+    del p, d, pos
+
+    mesh = mesh.r2c() #don't need to dealias, because 'particles' are all on grid points
     field_dict = {'delta':mesh}
     field_D = [D]
     
@@ -154,13 +159,14 @@ def real_to_redshift_space(field, nmesh, lbox, rank, nranks, f, fft=None, b=1):
     if knorm[0][0][0] == 0:
         knorm[0][0][0] = 1
         mu[0][0][0] = 0
+
     rsdfac = b + f * mu**2
     del kx, ky, kz, mu
         
     field_k_rsd = field_k * rsdfac
     field_rsd = fft.backward(field_k_rsd)
 
-    return field_rsd
+    return field_rsd, fft
 
 if __name__ == "__main__":
     
@@ -206,7 +212,7 @@ if __name__ == "__main__":
             lindir + "{}_{}_{}_np.npy".format(basename, nmesh, 'delta'),
             mmap_mode="r",
         )        
-        lag_field_dict['delta'] = arr[np.arange(rank, nmesh, size), :, :]
+        lag_field_dict['delta'] = arr[rank * nmesh // size : (rank + 1) * nmesh // size, :, :]
         keynames = ['delta']
         labelvec = ['delta']
     else:
@@ -220,6 +226,7 @@ if __name__ == "__main__":
             [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
         )
         field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec)
+
     # load tracers and deposit onto mesh.
     # TODO: generalize to accept different formats
     

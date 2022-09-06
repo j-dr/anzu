@@ -77,6 +77,7 @@ def send_parts_to_weights(idvec, posvec, nmesh, comm, idfac, overload):
 
     # presort before communication
     idx = np.argsort(send_rank)
+
     posvec = posvec.take(idx, axis=0)
     idvec = idvec.take(idx, axis=0)
     send_rank = send_rank[idx]
