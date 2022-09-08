@@ -161,7 +161,7 @@ def gaussian_filter(field, nmesh, lbox, rank, nranks, fft, kcut):
     kvalsr = np.fft.rfftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
 
     kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
-    filter = np.exp(-(kx ** 2 + ky ** 2 + kz ** 2) / (kcut ** 2))
+    filter = np.exp(-(kx ** 2 + ky ** 2 + kz ** 2) / (2 * kcut ** 2))
     fhat = filter * fhat
     del filter, kx, ky, kz
 
