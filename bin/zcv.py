@@ -107,6 +107,8 @@ def get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=None):
 
     if config['rsd']:
         delta, fft = real_to_redshift_space(lag_field_dict['delta'], nmesh, Lbox, rank, size, f, b=b)
+    else:
+        delta = lag_field_dict['delta']
 
     grid = np.meshgrid(
         np.arange(nmesh)[rank * nmesh // size : (rank + 1) * nmesh // size],

@@ -16,7 +16,9 @@ def integrate_field_to_kmax(field, kmax, dk):
 
     kmax = np.atleast_1d(kmax)
     sum = np.zeros_like(kmax)
-    kvec = field.x 
+    kvec = field.x
+
+    print('kvec: {}'.format(kvec))
     
     for s in kvec.slabs:
         knorm = np.sqrt(s.norm2())
