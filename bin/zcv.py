@@ -177,6 +177,10 @@ if __name__ == "__main__":
     size = comm.size    
 
     config = sys.argv[1]
+    if len(sys.argv)>2:
+        tracer_files = sys.argv[2:]
+    else:
+        tracer_files = None
 
     with open(config, "r") as fp:
         config = yaml.load(fp, Loader=Loader)
@@ -186,7 +190,10 @@ if __name__ == "__main__":
     lattice_type = int(config.get('lattice_type', 0))
     config['lattice_type'] = lattice_type
     lindir = config["outdir"]
-    tracer_file = config['tracer_file']
+
+    if tracer_files is None:
+        tracer_files= [config['tracer_file']]
+        
     kmax = np.atleast_1d(config['field_level_kmax'])
     nmesh = int(config['nmesh_out'])
     Lbox = float(config['lbox'])    
@@ -231,80 +238,78 @@ if __name__ == "__main__":
 
     # load tracers and deposit onto mesh.
     # TODO: generalize to accept different formats
+
+    for tracer_file in tracer_files:
     
-    if config['rsd']:
-        tracer_pos = h5py.File(tracer_file)['pos_zspace'][rank::size,:]
-    else:
-        tracer_pos = h5py.File(tracer_file)['pos_rspace'][rank::size,:]
+        if config['rsd']:
+            tracer_pos = h5py.File(tracer_file)['pos_zspace'][rank::size,:]
+        else:
+            tracer_pos = h5py.File(tracer_file)['pos_rspace'][rank::size,:]
         
-    layout = pm.decompose(tracer_pos)
-    p = layout.exchange(tracer_pos)
-    tracerfield = pm.paint(p, mass=1, resampler="cic")
-    tracerfield = tracerfield / tracerfield.cmean() - 1
-    tracerfield = tracerfield.r2c()
-    tracerfield.apply(CompensateCICAliasing, kind='circular')
-    del tracer_pos, p
+        layout = pm.decompose(tracer_pos)
+        p = layout.exchange(tracer_pos)
+        tracerfield = pm.paint(p, mass=1, resampler="cic")
+        tracerfield = tracerfield / tracerfield.cmean() - 1
+        tracerfield = tracerfield.r2c()
+        tracerfield.apply(CompensateCICAliasing, kind='circular')
+        del tracer_pos, p
         
-    #measure tracer auto-power
-    pk_tt_dict = measure_pk(tracerfield, tracerfield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
+        #measure tracer auto-power
+        pk_tt_dict = measure_pk(tracerfield, tracerfield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
     
-    field_dict2 = {'t':tracerfield}
-    field_D2 = [1]
+        field_dict2 = {'t':tracerfield}
+        field_D2 = [1]
     
-    pk_auto_vec, pk_cross_vec = measure_basis_spectra(
-        config,
-        field_dict,
-        field_D,
-        keynames,
-        labelvec,
-        zbox,
-        field_dict2=field_dict2,
-        field_D2=field_D2,
-        save=False
-    )
+        pk_auto_vec, pk_cross_vec = measure_basis_spectra(
+            config,
+            field_dict,
+            field_D,
+            keynames,
+            labelvec,
+            zbox,
+            field_dict2=field_dict2,
+            field_D2=field_D2,
+            save=False
+        )
     
-    if linear_surrogate:
-        stype = 'l'
-    else:
-        stype = 'z'
+        if linear_surrogate:
+            stype = 'l'
+        else:
+            stype = 'z'
         
-    np.save(
-        lindir
-        + "{}cv_surrogate_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
-            config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
-        ),
-        pk_auto_vec,
-    )    
+        np.save(
+            lindir
+            + "{}cv_surrogate_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
+                                                                                    config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+            ),
+            pk_auto_vec,
+        )    
     
-    np.save(
-        lindir
-        + "{}_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-            tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
-        ),
-        [pk_tt_dict],
-    )
+        np.save(
+            lindir
+            + "{}_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
+                tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+            ),
+            [pk_tt_dict],
+        )
     
-    np.save(
-        lindir
-        + "{}cv_cross_{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
-            tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
-        ),
-        pk_cross_vec,
-    )        
+        np.save(
+            lindir
+            + "{}cv_cross_{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
+                                                                              tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+            ),
+            pk_cross_vec,
+        )        
 
-    if not linear_surrogate:    
-        if bias_vec is None:
-            if field_level_bias:
-                bias_vec, M, A = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
-            else:
-                k, mu, pk_tt_wedge_array, pk_tt_pole_array = pk_list_to_vec([pk_tt_dict])
-                k, mu, pk_ij_wedge_array, pk_ij_pole_array = pk_list_to_vec(pk_auto_vec)
-
-                if config['rsd']:
-                    bias_vec = measure_2pt_bias(k, pk_ij_pole_array, pk_tt_pole_array[0,...], kmax)
-                else:
-                    bias_vec = measure_2pt_bias(k, pk_ij_wedge_array, pk_tt_wedge_array[0,...], kmax)
-                    
-                
-
-
+#    if not linear_surrogate:    
+#        if bias_vec is None:
+#            if field_level_bias:
+#                bias_vec, M, A = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
+#            else:
+#                k, mu, pk_tt_wedge_array, pk_tt_pole_array = pk_list_to_vec([pk_tt_dict])
+#                k, mu, pk_ij_wedge_array, pk_ij_pole_array = pk_list_to_vec(pk_auto_vec)
+#
+#                if config['rsd']:
+#                    bias_vec = measure_2pt_bias(k, pk_ij_pole_array, pk_tt_pole_array[0,...], kmax)
+#                else:
+#                    bias_vec = measure_2pt_bias(k, pk_ij_wedge_array, pk_tt_wedge_array[0,...], kmax)
