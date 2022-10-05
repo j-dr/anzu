@@ -15,39 +15,33 @@ from pmesh.pm import RealField, ComplexField
 def integrate_field_to_kmax(field, kmax, dk):
 
     kmax = np.atleast_1d(kmax)
-    sum = np.zeros_like(kmax)
-    kvec = field.x
-
-    print('kvec: {}'.format(kvec))
+    intg = np.zeros_like(kmax, dtype=field.dtype)
     
-    for s in kvec.slabs:
-        knorm = np.sqrt(s.norm2())
+    for s in field.slabs:
+        k = np.meshgrid(*s.x)
+        knorm = np.sqrt(k[0]**2 + k[1]**2 + k[2]**2)
         for i in range(kmax.shape[0]):
-            sum[i] += dk * field[s.index[knorm<kmax[i]]] / (2* np.pi)**3
+            intg[i] += np.sum(dk * s.T[np.newaxis, ...][knorm<kmax[i]])
             
-    return sum[i]
+    return intg
 
 
 def measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=None):
     
     m = field_dict.pop('1m', None)
+    
     if m is not None:
         field_D = field_D[1:]
         
     cb = field_dict.pop('1cb')
     field_D = field_D[1:]
-
     
-    if M is None:
-        M = np.zeros((len(field_dict), len(field_dict), len(kmax)))
-        
-    A = np.zeros((len(field_dict), len(kmax)))
-    
-    eps = tracerfield
+    eps = tracerfield.copy()
     if type(cb) is RealField:
         cb = cb.r2c()
     
-    dk = np.pi / Lbox
+    dk = 1
+    A = np.zeros((len(field_dict), len(kmax)), dtype=cb.dtype)    
     
     for (s0, s1, s2) in zip(eps.slabs, tracerfield.slabs, cb.slabs):
         s0[...] = s1 - s2
@@ -58,36 +52,51 @@ def measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, 
             f1 = f1.r2c()
         
         o = f1.copy()
+        
         for (s0, s1, s2) in zip(o.slabs, f1.slabs, eps.slabs):
             s0[...] = field_D[i]*s1 * s2.conj()
             
         A[i,...] = integrate_field_to_kmax(o, kmax, dk)
-        
-        if M is None:
+    
+    if M is None:
+        M = np.zeros((len(field_dict), len(field_dict), len(kmax)), dtype=f1.dtype)
+
+        for i, k1 in enumerate(field_dict):
+            f1 = field_dict[k1]
+
             for j, k2 in enumerate(field_dict):
                 f2 = field_dict[k2]
                 if j>i: continue
 
                 if type(f2) is RealField:
                     f2 = f2.r2c()
-                
+
                 o = f1.copy()
-                
+
                 for (s0, s1, s2) in zip(o.slabs, f1.slabs, f2.slabs):
                     s0[...] = field_D[i]*s1 * field_D[j]*s2.conj()
 
                 M[i,j,...] = integrate_field_to_kmax(o, kmax, dk)
-            
-    comm.Allreduce(A, A)
-    comm.Allreduce(M, M)
+                if i!=j:
+                    M[j,i,...] = M[i,j].conj()
+        comm.Allreduce(MPI.IN_PLACE, M)
+        
+    comm.Allreduce(MPI.IN_PLACE, A)
 
-    M += M.T
-    for i in range(len(M)):
-        M[i,i] /= 2
+    b_all = []
+    for n in range(len(kmax)):
+
+        b = np.dot(np.linalg.inv(M[...,n]), A[:,n]).real
+        b_all.append(b)
+        
+    zafield = cb.copy()
     
-    b = np.dot(np.linalv.inv(M), A)
+    for i, k1 in enumerate(field_dict):
+        zafield += b_all[0][i] * field_D[i] * field_dict[k1]
+        
+    field_dict['1cb'] = cb
     
-    return b, M, A
+    return M, A, b_all, zafield
 
 def advect_and_measure_bias(config):
     
@@ -125,15 +134,18 @@ def advect_and_measure_bias(config):
     layout = pm.decompose(tracer_pos)
     p = layout.exchange(tracer_pos)
     tracerfield = pm.paint(p, mass=1, resampler="cic")
+    tracerfield = tracerfield / tracerfield.cmean() - 1
     tracerfield = tracerfield.r2c()
     
     del tracer_pos, p        
         
-    bias_vec, M, A = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox)
-    
-    np.save('{}/b_{}_{}.npy'.format(config['outdir'], tracer_file.split('/')[-1], zbox), bias_vec)
-    np.save('{}/M_{}_{}.npy'.format(config['outdir'], tracer_file.split('/')[-1], zbox), M)    
-    np.save('{}/A_{}_{}.npy'.format(config['outdir'], tracer_file.split('/')[-1], zbox), A)
+    M, A, b_all, zafield = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox)
+   
+    np.save('{}/b_rsd={}_{}_a{:.4f}.npy'.format(config['outdir'], config['rsd'], tracer_file.split('/')[-1], 1 / (zbox + 1)), b_all)
+    np.save('{}/M_rsd={}_{}_a{:.4f}.npy'.format(config['outdir'], config['rsd'], tracer_file.split('/')[-1], 1 / (zbox + 1)), M)
+    np.save('{}/A_rsd={}_{}_a{:.4f}.npy'.format(config['outdir'], config['rsd'], tracer_file.split('/')[-1], 1 / (zbox + 1)), A)
+
+    return zafield
 
 if __name__ == "__main__":
     

@@ -135,7 +135,7 @@ def advect_fields(configs, lag_field_dict=None):
 
     ################################################################################################
     #################################### Advecting weights #########################################
-    print('instantiating mesh', flush=True)
+
     pm = pmesh.pm.ParticleMesh(
         [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
     )

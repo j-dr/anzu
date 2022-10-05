@@ -376,10 +376,11 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
         pkdict["nmodes_wedges"] = pk.wedges.nmodes
         pkdict["power_poles"] = pk.poles.power.real * D1 * D2
         pkdict["power_wedges"] = pk.wedges.power.real * D1 * D2
+        pkdict["shotnoise"] = pk.poles.shotnoise_nonorm
 
     else:
         pk = FFTPower(
-            mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, Nmu=Nmu, poles=poles
+            mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, poles=poles
         )
 
         pkdict["k"] = pk.power["k"].real

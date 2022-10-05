@@ -185,8 +185,8 @@ if __name__ == "__main__":
     with open(config, "r") as fp:
         config = yaml.load(fp, Loader=Loader)
     
-    config['compute_cv_surrogate'] = True
-    config['scale_dependent_growth'] = False
+#    config['compute_cv_surrogate'] = True
+#    config['scale_dependent_growth'] = False
     lattice_type = int(config.get('lattice_type', 0))
     config['lattice_type'] = lattice_type
     lindir = config["outdir"]
@@ -198,34 +198,45 @@ if __name__ == "__main__":
     nmesh = int(config['nmesh_out'])
     Lbox = float(config['lbox'])    
     linear_surrogate = config.get('linear_surrogate', False)
-    basename = "mpi_icfields_nmesh_filt"
-
+    measure_cross_spectra = config.get('measure_cross_spectra', True)
+    
+    if config['compute_cv_surrogate']:
+        basename = "mpi_icfields_nmesh_filt"
+    else:
+        basename = "mpi_icfields_nmesh"
+        
     if 'bias_vec' in config:
         bias_vec = config['bias_vec']
+        field_level_bias = False
+        M = None
     else:
-        bias_vec=None
+        bias_vec=[None]*len(tracer_files)
         field_level_bias = config.get('field_level_bias', False)
         M_file = config.get('field_level_M', None)
         if M_file:
             M = np.load(M_file)
         else:
             M = None
-    
-    #create/load surrogate linear fields
-    linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
-    if len(linfields)==0:
-        lag_field_dict = make_lagfields(config, save_to_disk=True)
-    elif linear_surrogate:
-        lag_field_dict = {}
-        arr = np.load(
-            lindir + "{}_{}_{}_np.npy".format(basename, nmesh, 'delta'),
-            mmap_mode="r",
-        )        
-        lag_field_dict['delta'] = arr[rank * nmesh // size : (rank + 1) * nmesh // size, :, :]
-        keynames = ['delta']
-        labelvec = ['delta']
+            
+
+    if config['scale_dependent_growth']:
+        z = get_snap_z(config["particledir"], config["sim_type"])
+        lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
     else:
-        lag_field_dict = None    
+        linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
+        if len(linfields)==0:
+            lag_field_dict = make_lagfields(config, save_to_disk=True)
+        elif linear_surrogate:
+            lag_field_dict = {}
+            arr = np.load(
+                lindir + "{}_{}_{}_np.npy".format(basename, nmesh, 'delta'),
+                mmap_mode="r",
+            )        
+            lag_field_dict['delta'] = arr[rank * nmesh // size : (rank + 1) * nmesh // size, :, :]
+            keynames = ['delta']
+            labelvec = ['delta']
+        else:
+            lag_field_dict = None    
         
     #advect ZA fields
     if not linear_surrogate:
@@ -234,12 +245,23 @@ if __name__ == "__main__":
         pm = pmesh.pm.ParticleMesh(
             [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
         )
-        field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec)
+        if len(tracer_files)==1:
+            field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec[0])
 
     # load tracers and deposit onto mesh.
     # TODO: generalize to accept different formats
 
-    for tracer_file in tracer_files:
+    if linear_surrogate:
+        stype = 'l'
+    elif config['compute_cv_surrogate']:
+        stype = 'z'
+    else:
+        stype = 'heft'
+    
+    for ii, tracer_file in enumerate(tracer_files):
+
+        if linear_surrogate and (len(tracer_files)>1):
+            field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec[ii])            
     
         if config['rsd']:
             tracer_pos = h5py.File(tracer_file)['pos_zspace'][rank::size,:]
@@ -259,32 +281,7 @@ if __name__ == "__main__":
     
         field_dict2 = {'t':tracerfield}
         field_D2 = [1]
-    
-        pk_auto_vec, pk_cross_vec = measure_basis_spectra(
-            config,
-            field_dict,
-            field_D,
-            keynames,
-            labelvec,
-            zbox,
-            field_dict2=field_dict2,
-            field_D2=field_D2,
-            save=False
-        )
-    
-        if linear_surrogate:
-            stype = 'l'
-        else:
-            stype = 'z'
-        
-        np.save(
-            lindir
-            + "{}cv_surrogate_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
-                                                                                    config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
-            ),
-            pk_auto_vec,
-        )    
-    
+
         np.save(
             lindir
             + "{}_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
@@ -292,24 +289,83 @@ if __name__ == "__main__":
             ),
             [pk_tt_dict],
         )
+        
+        if measure_cross_spectra:
     
+            pk_auto_vec, pk_cross_vec = measure_basis_spectra(
+                config,
+                field_dict,
+                field_D,
+                keynames,
+                labelvec,
+                zbox,
+                field_dict2=field_dict2,
+                field_D2=field_D2,
+                save=False
+            )
+    
+            np.save(
+                lindir
+                + "{}cv_surrogate_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
+                                                                                        config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+                ),
+                pk_auto_vec,
+            )    
+    
+    
+            np.save(
+                lindir
+                + "{}cv_cross_{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
+                                                                                  tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+                ),
+                pk_cross_vec,
+            )        
+
+        if (bias_vec[ii] is None) & field_level_bias:
+            if '1m' in field_dict:
+                dm = field_dict.pop('1m')
+                d = field_D[0]
+                field_D = field_D[1:]
+            else:
+                dm = None
+            M, A, bv, zafield = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
+
+            if dm is not None:
+                field_dict['1m'] = dm
+                temp = np.copy(field_D)
+                field_D = np.zeros(len(field_D)+1)
+                field_D[0] = d
+                field_D[1:] = temp
+
+            np.save('{}/b_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], tracer_file.split('/')[-1], 1 / (zbox + 1)), bv)
+            np.save('{}/M_{}cv_rsd={}_kmax{:.4f}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], 1 / (zbox + 1)), M)
+            np.save('{}/A_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], tracer_file.split('/')[-1], 1 / (zbox + 1)), A)                
+            
+        elif bias_vec is not None:
+            zafield = field_dict['1cb'].copy()
+            counter = 0
+            for j, k in enumerate(field_dict):
+                if (k=='1m') | (k=='1cb'): continue
+
+                try:
+                    zafield += bias_vec[ii][counter] * field_D[counter] * field_dict[k]
+                    counter += 1
+                except IndexError as e:
+                    continue
+
+        eps = tracerfield - zafield
+        pk_ee = measure_pk(eps, eps, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
+        pk_zz_fl = measure_pk(zafield, zafield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
+
         np.save(
             lindir
-            + "{}cv_cross_{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
-                                                                              tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
-            ),
-            pk_cross_vec,
-        )        
+            + "{}cv_surrogate_{}_resid_pk_rsd={}_kmax{:0.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
+            [pk_ee],
+        )
+        np.save(
+            lindir
+            + "{}cv_surrogate_{}_fieldsum_pk_rsd={}_kmax{:.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
+            [pk_zz_fl],
+        )
+                    
 
-#    if not linear_surrogate:    
-#        if bias_vec is None:
-#            if field_level_bias:
-#                bias_vec, M, A = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
-#            else:
-#                k, mu, pk_tt_wedge_array, pk_tt_pole_array = pk_list_to_vec([pk_tt_dict])
-#                k, mu, pk_ij_wedge_array, pk_ij_pole_array = pk_list_to_vec(pk_auto_vec)
-#
-#                if config['rsd']:
-#                    bias_vec = measure_2pt_bias(k, pk_ij_pole_array, pk_tt_pole_array[0,...], kmax)
-#                else:
-#                    bias_vec = measure_2pt_bias(k, pk_ij_wedge_array, pk_tt_wedge_array[0,...], kmax)
