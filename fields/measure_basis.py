@@ -324,6 +324,9 @@ def advect_fields(configs, lag_field_dict=None):
         if compensate:
             fieldlist[k] = fieldlist[k].r2c()
             fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
+        else:
+            fieldlist[k] = fieldlist[k].r2c()
+            
 
     sys.stdout.flush()
     #######################################################################################################################
