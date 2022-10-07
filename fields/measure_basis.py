@@ -1,4 +1,4 @@
-from .common_functions import load_particles, measure_pk
+from .common_functions import load_particles, measure_pk, _get_resampler
 from classy import Class
 from mpi4py import MPI
 from glob import glob
@@ -40,6 +40,15 @@ def CompensateCICAliasing(w, v):
     for i in range(3):
         wi = w[i]
         v = v / (1 - 2.0 / 3 * np.sin(0.5 * wi) ** 2) ** 0.5
+    return v
+
+def CompensateInterleavedCICAliasing(w, v):
+
+    for i in range(3):
+        wi = w[i]
+        tmp = (np.sinc(0.5 * wi / np.pi) ) ** 2
+        tmp[wi == 0.] = 1.
+        v = v / tmp
     return v
 
 
@@ -110,6 +119,9 @@ def advect_fields(configs, lag_field_dict=None):
     fdir = configs["particledir"]
     componentdir = configs["outdir"]
     cv_surrogate = configs["compute_cv_surrogate"]
+    interlaced = configs.get('interlaced', False)
+
+    H = Lbox / nmesh
 
     try:
         rsd = configs["rsd"]
@@ -126,6 +138,14 @@ def advect_fields(configs, lag_field_dict=None):
         basename = "mpi_icfields_nmesh"
         outname = "basis_spectra_nbody"
 
+    resampler_type = 'cic'
+    resampler = _get_resampler(resampler_type)
+
+    if interlaced:
+        factor = 1
+    else:
+        factor = 0.5
+
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     nranks = comm.Get_size()
@@ -137,7 +157,7 @@ def advect_fields(configs, lag_field_dict=None):
     #################################### Advecting weights #########################################
 
     pm = pmesh.pm.ParticleMesh(
-        [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
+        [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler=resampler, comm=comm
     )
 
     if rank == 0:
@@ -189,14 +209,32 @@ def advect_fields(configs, lag_field_dict=None):
 
         keynames = ["1m"]
         fieldlist = [pm.create(type="real")]
-        layout = pm.decompose(posvec_tot)
+        layout = pm.decompose(posvec_tot, smoothing=factor * resampler.support)
         p = layout.exchange(posvec_tot)
         del posvec_tot
         gc.collect()
         w = layout.exchange(m)
         del m
         gc.collect()
-        pm.paint(p, out=fieldlist[-1], mass=w, resampler="cic")
+        pm.paint(p, out=fieldlist[0], mass=w, resampler=resampler)
+
+        if interlaced:
+            shifted = pm.affine.shift(0.5)
+            field_interlaced = pm.create(type="real")
+            field_interlaced[:] = 0
+            pm.paint(p, mass=w,
+                     resampler=resampler,
+                     out=field_interlaced,
+                     transform=shifted)
+
+            c1 = fieldlist[0].r2c()
+            c2 = field_interlaced.r2c()
+
+            for k, s1, s2 in zip(c1.slabs.x, c1.slabs, c2.slabs):
+                kH = sum(k[i] * H for i in range(3))
+                s1[...] = s1[...] * 0.5 + s2[...] * 0.5 * np.exp(0.5 * 1j * kH)
+
+            c1.c2r(fieldlist[0])
 
     else:
         keynames = []
@@ -236,7 +274,7 @@ def advect_fields(configs, lag_field_dict=None):
     gc.collect()
 
     # Figure out where each particle position is going to be distributed among mpi ranks
-    layout = pm.decompose(posvec)
+    layout = pm.decompose(posvec, smoothing=factor*resampler.support)
     p = layout.exchange(posvec)
 
     if lag_field_dict:
@@ -250,12 +288,33 @@ def advect_fields(configs, lag_field_dict=None):
     del posvec
     gc.collect()
 
+    weight_arr = []
+    weight2_arr = []
+    
     for k in range(len(fieldlist)):
         if keynames[k] == "1m":
-            continue  # already handled this above
+            m = len(p)
+            pass  # already handled this above
+            
+        elif keynames[k] == "1cb":
+            m = len(p)
+            pm.paint(p, out=fieldlist[k], mass=1, resampler=resampler)
+            if interlaced:
+                field_interlaced = pm.create(type="real")
+                field_interlaced[:] = 0
+                shifted = pm.affine.shift(0.5)
 
-        if keynames[k] == "1cb":
-            pm.paint(p, out=fieldlist[k], mass=1, resampler="cic")
+                pm.paint(p, out=field_interlaced, mass=1, resampler=resampler, transform=shifted)
+
+                c1 = fieldlist[k].r2c()
+                c2 = field_interlaced.r2c()
+
+                for ki, s1, s2 in zip(c1.slabs.x, c1.slabs, c2.slabs):
+                    kH = sum(ki[i] * H for i in range(3))
+                    s1[...] = s1[...] * 0.5 + s2[...] * 0.5 * np.exp(0.5 * 1j * kH)
+
+                c1.c2r(fieldlist[k])
+
         else:
 
             if lag_field_dict:
@@ -285,15 +344,29 @@ def advect_fields(configs, lag_field_dict=None):
                 del w
             gc.collect()
 
-            pm.paint(p, out=fieldlist[k], mass=m, resampler="cic")
-            sys.stdout.flush()
-            del m
-            gc.collect()
+            pm.paint(p, out=fieldlist[k], mass=m, resampler=resampler)
+            if interlaced:
+                field_interlaced = pm.create(type="real")
+                field_interlaced[:] = 0
+                shifted = pm.affine.shift(0.5)
+                pm.paint(p, out=field_interlaced, mass=m, resampler=resampler, transform=shifted)
 
+                c1 = fieldlist[k].r2c()
+                c2 = field_interlaced.r2c()
+
+                for ki, s1, s2 in zip(c1.slabs.x, c1.slabs, c2.slabs):
+                    kH = sum(ki[i] * H for i in range(3))
+                    s1[...] = s1[...] * 0.5 + s2[...] * 0.5 * np.exp(0.5 * 1j * kH)
+
+                c1.c2r(fieldlist[k])
+
+        del m
+        gc.collect()
         sys.stdout.flush()
 
     del p
     gc.collect()
+
 
     # Normalize and mean-subtract the normal particle field.
     fieldlist[0] = fieldlist[0] / fieldlist[0].cmean() - 1
@@ -322,10 +395,14 @@ def advect_fields(configs, lag_field_dict=None):
                 )
 
         if compensate:
-            fieldlist[k] = fieldlist[k].r2c()
-            fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
+            fieldlist[k] = fieldlist[k].r2c()            
+            if not interlaced:
+                fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
+            else:
+                fieldlist[k] = fieldlist[k].apply(CompensateInterleavedCICAliasing, kind="circular")                
         else:
-            fieldlist[k] = fieldlist[k].r2c()
+            if not interlaced:
+                fieldlist[k] = fieldlist[k].r2c()
             
 
     sys.stdout.flush()

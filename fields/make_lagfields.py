@@ -381,9 +381,14 @@ def make_lagfields(configs, save_to_disk=False, z=None):
         ics.close()
 
     # Compute the delta^2 field. This operation is local in real space.
+    d[:] = u
+    dmean = MPI_mean(d, nmesh)
+    d -= dmean
+    
     d2 = newDistArray(fft, False)
     d2[:] = u * u
     dmean = MPI_mean(d2, nmesh)
+
 
     # Mean-subtract delta^2
     d2 -= dmean
@@ -443,6 +448,53 @@ def make_lagfields(configs, save_to_disk=False, z=None):
 
     fieldnames = ["delta", "deltasq", "tidesq", "nablasq"]
     lag_field_dict = dict(zip(fieldnames, [d, d2, v, ns]))
+
+    weight_arr = []
+    weight2_arr = []
+
+    for i in range(len(fieldnames)+1):
+        if i==0:
+            m_i = 1
+        else:
+            m_i = lag_field_dict[fieldnames[i-1]].v
+
+        if i==0:
+            w = nmesh**3
+        else:
+            w = comm.allreduce(np.sum(m_i))
+            
+        weight_arr.append(w)
+            
+        for j in range(len(fieldnames)+1):
+            if (i<j): continue
+
+            if j==0:
+                m_j = 1
+            else:
+                m_j = lag_field_dict[fieldnames[j-1]].v
+
+            if (i==0) & (j==0):
+                w2 = nmesh**3
+            else:
+                w2 = comm.allreduce(np.sum(m_i * m_j))
+                
+            if rank==0:
+                print(w2)
+                
+            weight2_arr.append(w2)
+
+
+    if rank==0:
+        neff = []
+        counter = 0
+        for i in range(len(fieldnames)+1):
+            for j in range(len(fieldnames)+1):
+                if (i < j): continue
+                neff.append(weight2_arr[counter] / (weight_arr[i]  * weight_arr[j]))
+                print(neff)
+                counter += 1
+
+        np.save(outdir + "{}_neff_nmesh{}.npy".format(basename, nmesh), neff)
 
     return lag_field_dict
 

@@ -1,6 +1,7 @@
 import os
 import struct
 from collections import namedtuple
+from pmesh.window import FindResampler, ResampleWindow
 from glob import glob
 import psutil
 import h5py
@@ -19,9 +20,21 @@ __GadgetHeader_fmt = '6I6dddii6Iiiddddii6Ii'
 
 GadgetHeader = namedtuple('GadgetHeader', \
         'npart mass time redshift flag_sfr flag_feedback npartTotal flag_cooling num_files BoxSize Omega0 OmegaLambda HubbleParam flag_age flag_metals NallHW flag_entr_ics')
+
+
 def get_memory():
     process = psutil.Process(os.getpid())
-    print(process.memory_info().rss/1e9, "GB is current memory usage")  # in bytes 
+    print(process.memory_info().rss/1e9, "GB is current memory usage")  # in bytes
+
+def _get_resampler(resampler):
+    # Return :class:`ResampleWindow` from string or :class:`ResampleWindow` instance
+    if isinstance(resampler, ResampleWindow):
+        return resampler
+    conversions = {'ngp': 'nnb', 'cic': 'cic', 'tsc': 'tsc', 'pcs': 'pcs'}
+    if resampler not in conversions:
+        raise ValueError('Unknown resampler {}, choices are {}'.format(resampler, list(conversions.keys())))
+    resampler = conversions[resampler]
+    return FindResampler(resampler)
 
 
 def readGadgetSnapshot(filename, read_pos=False, read_vel=False, read_id=False,\
@@ -394,3 +407,5 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
             )
 
     return pkdict
+
+

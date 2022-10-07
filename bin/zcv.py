@@ -1,11 +1,13 @@
 import numpy as np
 import sys, os
+sys.path.insert(0, '/global/cfs/projectdirs/cosmosim/slac/jderose/anzu/')
 from fields.make_lagfields import make_lagfields
 from fields.measure_basis import advect_fields, measure_basis_spectra
-from fields.common_functions import get_snap_z, measure_pk
+from fields.common_functions import get_snap_z, measure_pk, _get_resampler
 from fields.field_level_bias import measure_field_level_bias
 from mpi4py_fft import PFFT
 from anzu.utils import combine_real_space_spectra, combine_measured_rsd_spectra
+
 from scipy.optimize import minimize
 from scipy.interpolate import interp1d
 from classy import Class
@@ -17,6 +19,7 @@ from yaml import Loader
 import sys, yaml
 import h5py
 import gc
+
 
 def CompensateCICAliasing(w, v):
     """
@@ -199,6 +202,9 @@ if __name__ == "__main__":
     Lbox = float(config['lbox'])    
     linear_surrogate = config.get('linear_surrogate', False)
     measure_cross_spectra = config.get('measure_cross_spectra', True)
+
+    resampler_type = 'cic'
+    resampler = _get_resampler(resampler_type)
     
     if config['compute_cv_surrogate']:
         basename = "mpi_icfields_nmesh_filt"
@@ -225,7 +231,8 @@ if __name__ == "__main__":
     else:
         linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
         if len(linfields)==0:
-            lag_field_dict = make_lagfields(config, save_to_disk=True)
+            make_lagfields(config, save_to_disk=True)
+            lag_field_dict = None
         elif linear_surrogate:
             lag_field_dict = {}
             arr = np.load(
@@ -243,7 +250,7 @@ if __name__ == "__main__":
         pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(config, lag_field_dict=lag_field_dict)
     else:
         pm = pmesh.pm.ParticleMesh(
-            [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler="cic", comm=comm
+            [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler=resampler, comm=comm
         )
         if len(tracer_files)==1:
             field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec[0])
@@ -270,7 +277,7 @@ if __name__ == "__main__":
         
         layout = pm.decompose(tracer_pos)
         p = layout.exchange(tracer_pos)
-        tracerfield = pm.paint(p, mass=1, resampler="cic")
+        tracerfield = pm.paint(p, mass=1, resampler=resampler)
         tracerfield = tracerfield / tracerfield.cmean() - 1
         tracerfield = tracerfield.r2c()
         tracerfield.apply(CompensateCICAliasing, kind='circular')
@@ -321,51 +328,54 @@ if __name__ == "__main__":
                 pk_cross_vec,
             )        
 
-        if (bias_vec[ii] is None) & field_level_bias:
-            if '1m' in field_dict:
-                dm = field_dict.pop('1m')
-                d = field_D[0]
-                field_D = field_D[1:]
-            else:
-                dm = None
-            M, A, bv, zafield = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
+        if (bias_vec[ii] is None) & (not field_level_bias):
+            pass
+        else:
+            if (bias_vec[ii] is None) & field_level_bias:
+                if '1m' in field_dict:
+                    dm = field_dict.pop('1m')
+                    d = field_D[0]
+                    field_D = field_D[1:]
+                else:
+                    dm = None
+                M, A, bv, zafield = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
 
-            if dm is not None:
-                field_dict['1m'] = dm
-                temp = np.copy(field_D)
-                field_D = np.zeros(len(field_D)+1)
-                field_D[0] = d
-                field_D[1:] = temp
+                if dm is not None:
+                    field_dict['1m'] = dm
+                    temp = np.copy(field_D)
+                    field_D = np.zeros(len(field_D)+1)
+                    field_D[0] = d
+                    field_D[1:] = temp
 
-            np.save('{}/b_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], tracer_file.split('/')[-1], 1 / (zbox + 1)), bv)
-            np.save('{}/M_{}cv_rsd={}_kmax{:.4f}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], 1 / (zbox + 1)), M)
-            np.save('{}/A_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], tracer_file.split('/')[-1], 1 / (zbox + 1)), A)                
+                np.save('{}/b_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], tracer_file.split('/')[-1], 1 / (zbox + 1)), bv)
+                np.save('{}/M_{}cv_rsd={}_kmax{:.4f}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], 1 / (zbox + 1)), M)
+                np.save('{}/A_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], tracer_file.split('/')[-1], 1 / (zbox + 1)), A)                
             
-        elif bias_vec is not None:
-            zafield = field_dict['1cb'].copy()
-            counter = 0
-            for j, k in enumerate(field_dict):
-                if (k=='1m') | (k=='1cb'): continue
+            elif bias_vec[ii] is not None:
+                zafield = field_dict['1cb'].copy()
+                counter = 0
+                for j, k in enumerate(field_dict):
+                    if (k=='1m') | (k=='1cb'): continue
 
-                try:
-                    zafield += bias_vec[ii][counter] * field_D[counter] * field_dict[k]
-                    counter += 1
-                except IndexError as e:
-                    continue
+                    try:
+                        zafield += bias_vec[ii][counter] * field_D[counter] * field_dict[k]
+                        counter += 1
+                    except IndexError as e:
+                        continue
 
-        eps = tracerfield - zafield
-        pk_ee = measure_pk(eps, eps, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
-        pk_zz_fl = measure_pk(zafield, zafield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
+            eps = tracerfield - zafield
+            pk_ee = measure_pk(eps, eps, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
+            pk_zz_fl = measure_pk(zafield, zafield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
 
-        np.save(
-            lindir
-            + "{}cv_surrogate_{}_resid_pk_rsd={}_kmax{:0.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
-            [pk_ee],
-        )
-        np.save(
-            lindir
-            + "{}cv_surrogate_{}_fieldsum_pk_rsd={}_kmax{:.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
-            [pk_zz_fl],
-        )
+            np.save(
+                lindir
+                + "{}cv_surrogate_{}_resid_pk_rsd={}_kmax{:0.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
+                [pk_ee],
+            )
+            np.save(
+                lindir
+                + "{}cv_surrogate_{}_fieldsum_pk_rsd={}_kmax{:.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
+                [pk_zz_fl],
+            )
                     
 
