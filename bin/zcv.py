@@ -1,38 +1,27 @@
-import numpy as np
 import sys, os
-sys.path.insert(0, '/global/cfs/projectdirs/cosmosim/slac/jderose/anzu/')
-from fields.make_lagfields import make_lagfields
-from fields.measure_basis import advect_fields, measure_basis_spectra
-from fields.common_functions import get_snap_z, measure_pk, _get_resampler
-from fields.field_level_bias import measure_field_level_bias
 from mpi4py_fft import PFFT
 from anzu.utils import combine_real_space_spectra, combine_measured_rsd_spectra
-
-from scipy.optimize import minimize
 from scipy.interpolate import interp1d
 from classy import Class
 from mpi4py import MPI
-import pmesh
-from copy import copy
 from glob import glob
 from yaml import Loader
-import sys, yaml
+
+from fields.make_lagfields import make_lagfields
+from fields.measure_basis import advect_fields, measure_basis_spectra
+from fields.common_functions import get_snap_z, measure_pk, _get_resampler, CompensateCICAliasing, CompensateInterlacedCICAliasing
+from fields.field_level_bias import measure_field_level_bias
+
+import numpy as np
+import yaml
+import pmesh
 import h5py
 import gc
 
 
-def CompensateCICAliasing(w, v):
-    """
-    Return the Fourier-space kernel that accounts for the convolution of
-        the gridded field with the CIC window function in configuration space,
-            as well as the approximate aliasing correction
-    From the nbodykit documentation.
-    """
-    for i in range(3):
-        wi = w[i]
-        v = v / (1 - 2.0 / 3 * np.sin(0.5 * wi) ** 2) ** 0.5
-    return v
-
+comm = MPI.COMM_WORLD
+rank = comm.rank
+size = comm.size    
 
 def pk_list_to_vec(pk_ij_list):
 
@@ -74,25 +63,7 @@ def pk_list_to_vec(pk_ij_list):
     else:
         return k, mu, pk_wedge_array, None
 
-def measure_2pt_bias(k, pk_ij_heft, pk_tt, kmax, rsd=False):
-    
-    kidx = k.searchsorted(kmax)
-    kcut = k[:kidx[0]]
-    pk_tt_kcut = pk_tt[:kidx]
-    pk_ij_heft_kcut = pk_ij_heft[:,...,:kidx,np.newaxis]
-    
-    if not rsd:
-        loss = lambda bvec : np.sum((pk_tt_kcut - combine_real_space_spectra(kcut, pk_ij_heft_kcut, bvec)[:,0])**2/(pk_tt_kcut**2))
-        bvec0 = [1, 0, 0, 0, 0]
-    else:
-        loss = lambda bvec : np.sum((pk_tt_kcut - combine_measured_rsd_spectra(kcut, pk_ij_heft_kcut, None, bvec)[:,0])**2/(pk_tt_kcut**2))
-        bvec0 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    
-    out = minimize(loss, bvec0)
-    
-    return out
-
-def get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=None):
+def get_linear_field(config, lag_field_dict, rank, size, nmesh, Lbox, pm, bias_vec=None):
     
     boltz = Class()
     boltz.set(config["Cosmology"])
@@ -173,44 +144,176 @@ def real_to_redshift_space(field, nmesh, lbox, rank, nranks, f, fft=None, b=1):
 
     return field_rsd, fft
 
-if __name__ == "__main__":
+def get_cv_fields(config, lindir, basename, lbox, nmesh, linear_surrogate=False, bias_vec=[None]):
     
-    comm = MPI.COMM_WORLD
-    rank = comm.rank
-    size = comm.size    
-
-    config = sys.argv[1]
-    if len(sys.argv)>2:
-        tracer_files = sys.argv[2:]
+    resampler_type = 'cic'
+    resampler = _get_resampler(resampler_type)
+        
+    linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
+    if len(linfields)==0:
+        make_lagfields(config, save_to_disk=True)
+        lag_field_dict = None
+    elif linear_surrogate:
+        lag_field_dict = {}
+        arr = np.load(
+            lindir + "{}_{}_{}_np.npy".format(basename, nmesh, 'delta'),
+            mmap_mode="r",
+        )        
+        lag_field_dict['delta'] = arr[rank * nmesh // size : (rank + 1) * nmesh // size, :, :]
+        keynames = ['delta']
+        labelvec = ['delta']
     else:
-        tracer_files = None
+        lag_field_dict = None    
+        
+    #advect ZA fields
+    if not linear_surrogate:
+        pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(config, lag_field_dict=lag_field_dict)
+    else:
+        pm = pmesh.pm.ParticleMesh(
+            [nmesh, nmesh, nmesh], lbox, dtype="float32", resampler=resampler, comm=comm
+        )
+        field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, lbox, pm, bias_vec=bias_vec[0])    
+            
+    return pm, field_dict, field_D, keynames, labelvec, zbox 
 
-    with open(config, "r") as fp:
-        config = yaml.load(fp, Loader=Loader)
+
+def tracer_power(tracer_pos, resampler, pm, Lbox, nmesh, rsd=False, use_pypower=True, interlaced=True):
+    layout = pm.decompose(tracer_pos)
+    p = layout.exchange(tracer_pos)
+    tracerfield = pm.paint(p, mass=1, resampler=resampler)
     
-#    config['compute_cv_surrogate'] = True
-#    config['scale_dependent_growth'] = False
+    if interlaced:
+        H = Lbox / nmesh
+        shifted = pm.affine.shift(0.5)
+        field_interlaced = pm.create(type="real")
+        field_interlaced[:] = 0
+        pm.paint(p, mass=1,
+                    resampler=resampler,
+                    out=field_interlaced,
+                    transform=shifted)
+
+        c1 = tracerfield.r2c()
+        c2 = field_interlaced.r2c()
+
+        for k, s1, s2 in zip(c1.slabs.x, c1.slabs, c2.slabs):
+            kH = sum(k[i] * H for i in range(3))
+            s1[...] = s1[...] * 0.5 + s2[...] * 0.5 * np.exp(0.5 * 1j * kH)
+
+        c1.c2r(tracerfield)
+    
+    tracerfield = tracerfield / tracerfield.cmean() - 1
+    tracerfield = tracerfield.r2c()
+    
+    if interlaced:
+        tracerfield.apply(CompensateInterlacedCICAliasing, kind='circular')
+    else:
+        tracerfield.apply(CompensateCICAliasing, kind='circular')
+        
+    del tracer_pos, p
+    
+    #measure tracer auto-power
+    pk_tt_dict = measure_pk(tracerfield, tracerfield, Lbox, nmesh, rsd, use_pypower, 1, 1)
+
+    return tracerfield, pk_tt_dict
+
+
+def field_level_bias(tracerfield, field_dict, field_D, nmesh, kmax, Lbox,
+                     pm, rsd, M=None, save=True, outdir=None,
+                     stype=None, tbase=None, zbox=None):
+    
+    if '1m' in field_dict:
+        dm = field_dict.pop('1m')
+        d = field_D[0]
+        field_D = field_D[1:]
+    else:
+        dm = None
+    M, A, bv, zafield = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
+
+    if dm is not None:
+        field_dict['1m'] = dm
+        temp = np.copy(field_D)
+        field_D = np.zeros(len(field_D)+1)
+        field_D[0] = d
+        field_D[1:] = temp
+        
+    if save:
+        np.save('{}/b_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(outdir, stype, rsd, kmax[0], tbase, 1 / (zbox + 1)), bv)
+        np.save('{}/M_{}cv_rsd={}_kmax{:.4f}_a{:.4f}.npy'.format(outdir, stype, rsd, kmax[0], 1 / (zbox + 1)), M)
+        np.save('{}/A_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(outdir, stype, rsd, kmax[0], tbase, 1 / (zbox + 1)), A)                
+        
+    return bv, zafield
+    
+        
+def error_power_spectrum(tracerfield, bias_vec, field_dict, field_D, 
+                         nmesh, kmax, Lbox, rsd, save=False, lindir=None,
+                         use_pypower=True, stype=None, tbase=None, zbox=None):
+    
+    zafield = field_dict['1cb'].copy()
+    counter = 0
+    
+    for j, k in enumerate(field_dict):
+        if (k=='1m') | (k=='1cb'): continue
+
+        try:
+            zafield += bias_vec[counter] * field_D[counter] * field_dict[k]
+            counter += 1
+        except IndexError as e:
+            continue
+
+    eps = tracerfield - zafield
+    pk_ee = measure_pk(eps, eps, Lbox, nmesh, rsd, use_pypower, 1, 1)
+    pk_zz_fl = measure_pk(zafield, zafield, Lbox, nmesh, rsd, use_pypower, 1, 1)
+
+    if save:
+        np.save(
+            lindir
+            + "{}cv_surrogate_{}_resid_pk_rsd={}_kmax{:0.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tbase, rsd, kmax[0], 4, use_pypower, 1 / (zbox + 1), nmesh),
+            [pk_ee],
+        )
+        
+        np.save(
+            lindir
+            + "{}cv_surrogate_{}_fieldsum_pk_rsd={}_kmax{:.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tbase, rsd, kmax[0], 4, use_pypower, 1 / (zbox + 1), nmesh),
+            [pk_zz_fl],
+        )
+    
+
+def reduce_variance(config, tracer_files=None, tracer_pos_list=None, save=True, measure_perr=False):
+    
+    #configuration
+    if (tracer_files is None) & (tracer_pos_list is None):
+        tracer_files= [config['tracer_file']]
+        read_tracers = True
+        n_tracers = 1
+    elif tracer_pos_list:
+        read_tracers=False
+        n_tracers = len(tracer_pos_list)
+    else:
+        read_tracers=True
+        n_tracers = 1
+            
     lattice_type = int(config.get('lattice_type', 0))
     config['lattice_type'] = lattice_type
     lindir = config["outdir"]
-
-    if tracer_files is None:
-        tracer_files= [config['tracer_file']]
         
     kmax = np.atleast_1d(config['field_level_kmax'])
     nmesh = int(config['nmesh_out'])
     Lbox = float(config['lbox'])    
     linear_surrogate = config.get('linear_surrogate', False)
+    rsd = config['rsd']
     measure_cross_spectra = config.get('measure_cross_spectra', True)
 
     resampler_type = 'cic'
     resampler = _get_resampler(resampler_type)
+    interlaced = config.get('interlaced', False)
     
     if config['compute_cv_surrogate']:
         basename = "mpi_icfields_nmesh_filt"
     else:
-        basename = "mpi_icfields_nmesh"
+        basename = "mpi_icfields_nmesh"    
         
+    # Optionally pass measured biases, or ask for them to 
+    # be fit for a the field level.
     if 'bias_vec' in config:
         bias_vec = config['bias_vec']
         field_level_bias = False
@@ -222,83 +325,51 @@ if __name__ == "__main__":
         if M_file:
             M = np.load(M_file)
         else:
-            M = None
-            
-
-    if config['scale_dependent_growth']:
-        z = get_snap_z(config["particledir"], config["sim_type"])
-        lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
-    else:
-        linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
-        if len(linfields)==0:
-            make_lagfields(config, save_to_disk=True)
-            lag_field_dict = None
-        elif linear_surrogate:
-            lag_field_dict = {}
-            arr = np.load(
-                lindir + "{}_{}_{}_np.npy".format(basename, nmesh, 'delta'),
-                mmap_mode="r",
-            )        
-            lag_field_dict['delta'] = arr[rank * nmesh // size : (rank + 1) * nmesh // size, :, :]
-            keynames = ['delta']
-            labelvec = ['delta']
-        else:
-            lag_field_dict = None    
-        
-    #advect ZA fields
-    if not linear_surrogate:
-        pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(config, lag_field_dict=lag_field_dict)
-    else:
-        pm = pmesh.pm.ParticleMesh(
-            [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler=resampler, comm=comm
-        )
-        if len(tracer_files)==1:
-            field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec[0])
-
-    # load tracers and deposit onto mesh.
-    # TODO: generalize to accept different formats
+            M = None       
 
     if linear_surrogate:
         stype = 'l'
     elif config['compute_cv_surrogate']:
         stype = 'z'
     else:
-        stype = 'heft'
-    
-    for ii, tracer_file in enumerate(tracer_files):
+        stype = 'heft'    
+        
+    #get the relevant cv fields         
+    pm, field_dict, field_D, keynames, labelvec, zbox  = get_cv_fields(config, lindir, basename, Lbox, nmesh, 
+                                                                       linear_surrogate=linear_surrogate, linear_bias=bias_vec[0])
 
-        if linear_surrogate and (len(tracer_files)>1):
-            field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec[ii])            
-    
-        if config['rsd']:
-            tracer_pos = h5py.File(tracer_file)['pos_zspace'][rank::size,:]
+    for ii in range(n_tracers):
+        if read_tracers:
+            tracer_file = tracer_files[ii]
+
+            if rsd:
+                tracer_pos = h5py.File(tracer_file)['pos_zspace'][rank::size,:]
+            else:   
+                tracer_pos = h5py.File(tracer_file)['pos_rspace'][rank::size,:]            
         else:
-            tracer_pos = h5py.File(tracer_file)['pos_rspace'][rank::size,:]
-        
-        layout = pm.decompose(tracer_pos)
-        p = layout.exchange(tracer_pos)
-        tracerfield = pm.paint(p, mass=1, resampler=resampler)
-        tracerfield = tracerfield / tracerfield.cmean() - 1
-        tracerfield = tracerfield.r2c()
-        tracerfield.apply(CompensateCICAliasing, kind='circular')
-        del tracer_pos, p
-        
-        #measure tracer auto-power
-        pk_tt_dict = measure_pk(tracerfield, tracerfield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
-    
+            tracer_pos = tracer_pos_list[ii]
+            tracer_file = None
+
+        tracerfield, pk_tt_dict = tracer_power(tracer_pos, resampler, pm, Lbox, nmesh, rsd=False, interlaced=interlaced)                
+
         field_dict2 = {'t':tracerfield}
         field_D2 = [1]
+
+        if tracer_file:
+            tbase = tracer_file.split('/')[-1]
+        else:
+            tbase = 'tt_{}'.format(ii)
 
         np.save(
             lindir
             + "{}_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+                tbase, config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
             ),
             [pk_tt_dict],
         )
-        
+
         if measure_cross_spectra:
-    
+        
             pk_auto_vec, pk_cross_vec = measure_basis_spectra(
                 config,
                 field_dict,
@@ -319,63 +390,47 @@ if __name__ == "__main__":
                 pk_auto_vec,
             )    
     
-    
             np.save(
                 lindir
                 + "{}cv_cross_{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
-                                                                                  tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+                                                                                  tbase, config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
                 ),
                 pk_cross_vec,
-            )        
-
-        if (bias_vec[ii] is None) & (not field_level_bias):
-            pass
-        else:
-            if (bias_vec[ii] is None) & field_level_bias:
-                if '1m' in field_dict:
-                    dm = field_dict.pop('1m')
-                    d = field_D[0]
-                    field_D = field_D[1:]
-                else:
-                    dm = None
-                M, A, bv, zafield = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
-
-                if dm is not None:
-                    field_dict['1m'] = dm
-                    temp = np.copy(field_D)
-                    field_D = np.zeros(len(field_D)+1)
-                    field_D[0] = d
-                    field_D[1:] = temp
-
-                np.save('{}/b_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], tracer_file.split('/')[-1], 1 / (zbox + 1)), bv)
-                np.save('{}/M_{}cv_rsd={}_kmax{:.4f}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], 1 / (zbox + 1)), M)
-                np.save('{}/A_{}cv_rsd={}_kmax{:.4f}_{}_a{:.4f}.npy'.format(config['outdir'], stype, config['rsd'], kmax[0], tracer_file.split('/')[-1], 1 / (zbox + 1)), A)                
+            )
             
-            elif bias_vec[ii] is not None:
-                zafield = field_dict['1cb'].copy()
-                counter = 0
-                for j, k in enumerate(field_dict):
-                    if (k=='1m') | (k=='1cb'): continue
+        if (bias_vec[ii] is None) & (field_level_bias):
+            bv, field_level_bias(tracerfield, field_dict, field_D, nmesh, kmax, Lbox,
+                            pm, rsd, M=M, save=save, outdir=lindir,
+                            stype=stype, tbase=tbase, zbox=zbox)
+        else:
+            bv = bias_vec[ii]
+            
+        if measure_perr:
+            error_power_spectrum(tracerfield, bv, field_dict, field_D, 
+                         nmesh, kmax, Lbox, rsd, save=save, lindir=lindir,
+                         use_pypower=True, stype=stype, tbase=tbase, zbox=zbox)
+            
+        np.save(
+            lindir
+            + "{}_auto_zcved_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
+                tbase, config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+            ),
+            [pk_tt_hat],
+        )
 
-                    try:
-                        zafield += bias_vec[ii][counter] * field_D[counter] * field_dict[k]
-                        counter += 1
-                    except IndexError as e:
-                        continue
+if __name__ == "__main__":
+    
+    config = sys.argv[1]
+    if len(sys.argv)>2:
+        tracer_files = sys.argv[2:]
+    else:
+        tracer_files = None
 
-            eps = tracerfield - zafield
-            pk_ee = measure_pk(eps, eps, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
-            pk_zz_fl = measure_pk(zafield, zafield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
+    with open(config, "r") as fp:
+        config = yaml.load(fp, Loader=Loader)
 
-            np.save(
-                lindir
-                + "{}cv_surrogate_{}_resid_pk_rsd={}_kmax{:0.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
-                [pk_ee],
-            )
-            np.save(
-                lindir
-                + "{}cv_surrogate_{}_fieldsum_pk_rsd={}_kmax{:.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
-                [pk_zz_fl],
-            )
-                    
+    if tracer_files is None:
+        tracer_files= [config['tracer_file']]
+
+    reduce_variance(config, tracer_files=tracer_files)
 

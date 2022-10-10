@@ -1,4 +1,4 @@
-from .common_functions import load_particles, measure_pk, _get_resampler
+from .common_functions import load_particles, measure_pk, _get_resampler, CompensateInterlacedCICAliasing, CompensateCICAliasing
 from classy import Class
 from mpi4py import MPI
 from glob import glob
@@ -28,29 +28,6 @@ def mpiprint(text, rank):
         sys.stdout.flush()
     else:
         pass
-
-
-def CompensateCICAliasing(w, v):
-    """
-    Return the Fourier-space kernel that accounts for the convolution of
-        the gridded field with the CIC window function in configuration space,
-            as well as the approximate aliasing correction
-    From the nbodykit documentation.
-    """
-    for i in range(3):
-        wi = w[i]
-        v = v / (1 - 2.0 / 3 * np.sin(0.5 * wi) ** 2) ** 0.5
-    return v
-
-def CompensateInterleavedCICAliasing(w, v):
-
-    for i in range(3):
-        wi = w[i]
-        tmp = (np.sinc(0.5 * wi / np.pi) ) ** 2
-        tmp[wi == 0.] = 1.
-        v = v / tmp
-    return v
-
 
 def exchange(send_counts, send_offsets, recv_counts, recv_offsets, data, comm):
 
@@ -288,9 +265,6 @@ def advect_fields(configs, lag_field_dict=None):
     del posvec
     gc.collect()
 
-    weight_arr = []
-    weight2_arr = []
-    
     for k in range(len(fieldlist)):
         if keynames[k] == "1m":
             m = len(p)
@@ -399,7 +373,7 @@ def advect_fields(configs, lag_field_dict=None):
             if not interlaced:
                 fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
             else:
-                fieldlist[k] = fieldlist[k].apply(CompensateInterleavedCICAliasing, kind="circular")                
+                fieldlist[k] = fieldlist[k].apply(CompensateInterlacedCICAliasing, kind="circular")                
         else:
             if not interlaced:
                 fieldlist[k] = fieldlist[k].r2c()
@@ -548,8 +522,6 @@ def measure_basis_spectra(
     return pk_auto_vec, kpkvec
             
     
-
-
 def advect_fields_and_measure_spectra(
     config, lag_field_dict=None, field_dict2=None, field_D2=None
 ):

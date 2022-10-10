@@ -311,40 +311,38 @@ def load_particles(
 
             npart_counter += npart_block
     else:
-        if ic_format == "monofonic":
-            n_ = [nmesh, nmesh, nmesh]
-            get_cell_idx = lambda i, j, k: (i * n_[1] + j) * n_[2] + k
-            with h5py.File(icfile, "r") as ics:
-                # read in displacements, rescale by D=D(z_this)/D(z_ini)
-                grid = np.meshgrid(
-                    np.arange(rank, nmesh, size),
-                    np.arange(nmesh),
-                    np.arange(nmesh),
-                    indexing="ij",
-                )
-                pos_x = (
-                    (grid[0] / nmesh + D * ics["DM_dx_filt"][rank::size, ...]) % 1
-                ) * lbox
-                pos_y = (
-                    (grid[1] / nmesh + D * ics["DM_dy_filt"][rank::size, ...]) % 1
-                ) * lbox
-                pos_z = (
-                    (grid[2] / nmesh + D * (1 + f) * ics["DM_dz_filt"][rank::size, ...]) % 1
-                ) * lbox
+        n_ = [nmesh, nmesh, nmesh]
+        get_cell_idx = lambda i, j, k: (i * n_[1] + j) * n_[2] + k
+        filt_ics_file = '/'.join(icfile.split('/')[:-1]) + '/filtered_ics.h5'
+        
+        with h5py.File(filt_ics_file, "r") as ics:
+            # read in displacements, rescale by D=D(z_this)/D(z_ini)
+            grid = np.meshgrid(
+                np.arange(rank, nmesh, size),
+                np.arange(nmesh),
+                np.arange(nmesh),
+                indexing="ij",
+            )
+            pos_x = (
+                (grid[0] / nmesh + D * ics["DM_dx_filt"][rank::size, ...]) % 1
+            ) * lbox
+            pos_y = (
+                (grid[1] / nmesh + D * ics["DM_dy_filt"][rank::size, ...]) % 1
+            ) * lbox
+            pos_z = (
+                (grid[2] / nmesh + D * (1 + f) * ics["DM_dz_filt"][rank::size, ...]) % 1
+            ) * lbox
 
-                pos = np.stack([pos_x, pos_y, pos_z])
-                pos = pos.reshape(3, -1).T
-                del pos_x, pos_y, pos_z
-                gc.collect()
+            pos = np.stack([pos_x, pos_y, pos_z])
+            pos = pos.reshape(3, -1).T
+            del pos_x, pos_y, pos_z
+            gc.collect()
 
-                ids = get_cell_idx(grid[0], grid[1], grid[2])
-                del grid
-                gc.collect()
+            ids = get_cell_idx(grid[0], grid[1], grid[2])
+            del grid
+            gc.collect()
 
-                mass = 1
-
-        else:
-            raise (ValueError("ic_format {} is unsupported".format(ic_format)))
+            mass = 1
 
     return pos, ids, npart_this, z_this, mass, D
 
@@ -364,6 +362,26 @@ def kroneckerdelta(i, j):
     else:
         return 0
 
+def CompensateCICAliasing(w, v):
+    """
+    Return the Fourier-space kernel that accounts for the convolution of
+        the gridded field with the CIC window function in configuration space,
+            as well as the approximate aliasing correction
+    From the nbodykit documentation.
+    """
+    for i in range(3):
+        wi = w[i]
+        v = v / (1 - 2.0 / 3 * np.sin(0.5 * wi) ** 2) ** 0.5
+    return v
+
+def CompensateInterlacedCICAliasing(w, v):
+
+    for i in range(3):
+        wi = w[i]
+        tmp = (np.sinc(0.5 * wi / np.pi) ) ** 2
+        tmp[wi == 0.] = 1.
+        v = v / tmp
+    return v
 
 def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
     
