@@ -7,38 +7,54 @@ import psutil
 import h5py
 import numpy as np
 import gc
+
 try:
     from nbodykit.algorithms.fftpower import FFTPower
 except Exception as e:
     print(e)
-    
+
 from pypower import MeshFFTPower
 
-__all__ = ['readGadgetSnapshot', 'GadgetHeader']
+__all__ = ["readGadgetSnapshot", "GadgetHeader"]
 
-__GadgetHeader_fmt = '6I6dddii6Iiiddddii6Ii'
+__GadgetHeader_fmt = "6I6dddii6Iiiddddii6Ii"
 
-GadgetHeader = namedtuple('GadgetHeader', \
-        'npart mass time redshift flag_sfr flag_feedback npartTotal flag_cooling num_files BoxSize Omega0 OmegaLambda HubbleParam flag_age flag_metals NallHW flag_entr_ics')
+GadgetHeader = namedtuple(
+    "GadgetHeader",
+    "npart mass time redshift flag_sfr flag_feedback npartTotal flag_cooling num_files BoxSize Omega0 OmegaLambda HubbleParam flag_age flag_metals NallHW flag_entr_ics",
+)
 
 
 def get_memory():
     process = psutil.Process(os.getpid())
-    print(process.memory_info().rss/1e9, "GB is current memory usage")  # in bytes
+    print(process.memory_info().rss / 1e9, "GB is current memory usage")  # in bytes
+
 
 def _get_resampler(resampler):
     # Return :class:`ResampleWindow` from string or :class:`ResampleWindow` instance
     if isinstance(resampler, ResampleWindow):
         return resampler
-    conversions = {'ngp': 'nnb', 'cic': 'cic', 'tsc': 'tsc', 'pcs': 'pcs'}
+    conversions = {"ngp": "nnb", "cic": "cic", "tsc": "tsc", "pcs": "pcs"}
     if resampler not in conversions:
-        raise ValueError('Unknown resampler {}, choices are {}'.format(resampler, list(conversions.keys())))
+        raise ValueError(
+            "Unknown resampler {}, choices are {}".format(
+                resampler, list(conversions.keys())
+            )
+        )
     resampler = conversions[resampler]
     return FindResampler(resampler)
 
 
-def readGadgetSnapshot(filename, read_pos=False, read_vel=False, read_id=False,\
-        read_mass=False, print_header=False, single_type=-1, lgadget=False):
+def readGadgetSnapshot(
+    filename,
+    read_pos=False,
+    read_vel=False,
+    read_id=False,
+    read_mass=False,
+    print_header=False,
+    single_type=-1,
+    lgadget=False,
+):
     """
     This function reads the Gadget-2 snapshot file.
 
@@ -72,18 +88,28 @@ def readGadgetSnapshot(filename, read_pos=False, read_vel=False, read_id=False,\
     """
     blocks_to_read = (read_pos, read_vel, read_id, read_mass)
     ret = []
-    with open(filename, 'rb') as f:
+    with open(filename, "rb") as f:
         f.seek(4, 1)
-        h = list(struct.unpack(__GadgetHeader_fmt, \
-                f.read(struct.calcsize(__GadgetHeader_fmt))))
+        h = list(
+            struct.unpack(
+                __GadgetHeader_fmt, f.read(struct.calcsize(__GadgetHeader_fmt))
+            )
+        )
         if lgadget:
             h[30] = 0
             h[31] = h[18]
             h[18] = 0
             single_type = 1
         h = tuple(h)
-        header = GadgetHeader._make((h[0:6],) + (h[6:12],) + h[12:16] \
-                + (h[16:22],) + h[22:30] + (h[30:36],) + h[36:])
+        header = GadgetHeader._make(
+            (h[0:6],)
+            + (h[6:12],)
+            + h[12:16]
+            + (h[16:22],)
+            + h[22:30]
+            + (h[30:36],)
+            + h[36:]
+        )
         if print_header:
             print(header)
         if not any(blocks_to_read):
@@ -113,34 +139,35 @@ def readGadgetSnapshot(filename, read_pos=False, read_vel=False, read_id=False,\
                     break
                 npart = mass_npart
             #
-            size_check = struct.unpack('I', f.read(4))[0]
+            size_check = struct.unpack("I", f.read(4))[0]
             #
-            block_item_size = item_per_part*sum(npart)
-            if size_check != block_item_size*fmt.itemsize:
+            block_item_size = item_per_part * sum(npart)
+            if size_check != block_item_size * fmt.itemsize:
                 fmt = fmt_64
-            if size_check != block_item_size*fmt.itemsize:
-                raise ValueError('Invalid block size in file!')
-            size_per_part = item_per_part*fmt.itemsize
+            if size_check != block_item_size * fmt.itemsize:
+                raise ValueError("Invalid block size in file!")
+            size_per_part = item_per_part * fmt.itemsize
             #
             if not b:
-                f.seek(sum(npart)*size_per_part, 1)
+                f.seek(sum(npart) * size_per_part, 1)
             else:
                 if single_type > -1:
-                    f.seek(sum(npart[:single_type])*size_per_part, 1)
+                    f.seek(sum(npart[:single_type]) * size_per_part, 1)
                     npart_this = npart[single_type]
                 else:
                     npart_this = sum(npart)
-                data = np.fromstring(f.read(npart_this*size_per_part), fmt)
+                data = np.fromstring(f.read(npart_this * size_per_part), fmt)
                 if item_per_part > 1:
                     data.shape = (npart_this, item_per_part)
                 ret.append(data)
-                if not any(blocks_to_read[i+1:]):
+                if not any(blocks_to_read[i + 1 :]):
                     break
                 if single_type > -1:
-                    f.seek(sum(npart[single_type+1:])*size_per_part, 1)
+                    f.seek(sum(npart[single_type + 1 :]) * size_per_part, 1)
             f.seek(4, 1)
     #
     return tuple(ret)
+
 
 def get_snap_z(basedir, sim_type):
     """Count up the number of particles that will be read in by this rank.
@@ -166,6 +193,7 @@ def get_snap_z(basedir, sim_type):
         z_this = header["redshift"]
 
     return z_this
+
 
 def get_Nparts(snapfiles, sim_type, parttype):
     """Count up the number of particles that will be read in by this rank.
@@ -202,6 +230,7 @@ def get_Nparts(snapfiles, sim_type, parttype):
     else:
         return npart, z_this, mass
 
+
 def load_particles(
     sim_type,
     rank,
@@ -217,7 +246,7 @@ def load_particles(
     boltz=None,
     z_ic=None,
     rsd=False,
-    z_this=None
+    z_this=None,
 ):
 
     if not cv_surrogate:
@@ -225,10 +254,10 @@ def load_particles(
             snapfiles = glob(basedir + "*hdf5")
         elif sim_type == "Gadget":
             snapfiles = glob(basedir + "*")
-        
+
         snapfiles_this = snapfiles[rank::size]
         nfiles_this = len(snapfiles_this)
-        npart_this, z_this, mass = get_Nparts(snapfiles_this, sim_type, parttype)            
+        npart_this, z_this, mass = get_Nparts(snapfiles_this, sim_type, parttype)
         pos = np.zeros((npart_this, 3))
         if parttype == 1:
             ids = np.zeros(npart_this, dtype=np.int)
@@ -250,10 +279,10 @@ def load_particles(
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)
     Ha = boltz.Hubble(z_this) * 299792.458
-    
+
     if rsd:
         f = boltz.scale_independent_growth_factor_f(z_this)
-        v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()  # (v_p = v_gad * a^(1/2))        
+        v_fac = (1 + z_this) ** 0.5 / Ha * boltz.h()  # (v_p = v_gad * a^(1/2))
     else:
         f = 0
         v_fac = 0
@@ -313,8 +342,8 @@ def load_particles(
     else:
         n_ = [nmesh, nmesh, nmesh]
         get_cell_idx = lambda i, j, k: (i * n_[1] + j) * n_[2] + k
-        filt_ics_file = '/'.join(icfile.split('/')[:-1]) + '/filtered_ics.h5'
-        
+        filt_ics_file = "/".join(icfile.split("/")[:-1]) + "/filtered_ics.h5"
+
         with h5py.File(filt_ics_file, "r") as ics:
             # read in displacements, rescale by D=D(z_this)/D(z_ini)
             grid = np.meshgrid(
@@ -348,19 +377,20 @@ def load_particles(
 
 
 def position_to_index(pos, lbox, nmesh):
-    
-    deltax = lbox/nmesh
-    
-    
-    idvec = np.floor((pos)/deltax) 
-    
-    return (idvec%nmesh).astype('int16')
+
+    deltax = lbox / nmesh
+
+    idvec = np.floor((pos) / deltax)
+
+    return (idvec % nmesh).astype("int16")
+
 
 def kroneckerdelta(i, j):
     if i == j:
         return 1
     else:
         return 0
+
 
 def CompensateCICAliasing(w, v):
     """
@@ -374,17 +404,19 @@ def CompensateCICAliasing(w, v):
         v = v / (1 - 2.0 / 3 * np.sin(0.5 * wi) ** 2) ** 0.5
     return v
 
+
 def CompensateInterlacedCICAliasing(w, v):
 
     for i in range(3):
         wi = w[i]
-        tmp = (np.sinc(0.5 * wi / np.pi) ) ** 2
-        tmp[wi == 0.] = 1.
+        tmp = (np.sinc(0.5 * wi / np.pi)) ** 2
+        tmp[wi == 0.0] = 1.0
         v = v / tmp
     return v
 
+
 def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
-    
+
     k_edges = np.linspace(0, nmesh * np.pi / lbox, int(nmesh // 2))
     if not rsd:
         edges = k_edges
@@ -410,9 +442,7 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
         pkdict["shotnoise"] = pk.poles.shotnoise_nonorm
 
     else:
-        pk = FFTPower(
-            mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, poles=poles
-        )
+        pk = FFTPower(mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, poles=poles)
 
         pkdict["k"] = pk.power["k"].real
         pkdict["nmodes"] = pk.power["modes"].real
@@ -425,5 +455,3 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
             )
 
     return pkdict
-
-

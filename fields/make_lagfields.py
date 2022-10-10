@@ -20,27 +20,27 @@ def get_linear_field(ic_format, ic_path, nmesh, fft, cv=False):
     """Load a linear density field.
 
     Args:
-        ic_format (string): The format of the IC file. 
+        ic_format (string): The format of the IC file.
             Supported options are monofonic, ngenic, or abacus.
         ic_path (string): The file to read the linear density from.
     """
-    
+
     delta_lin = newDistArray(fft, False)
-        
+
     try:
         if ic_format == "monofonic":
             ics = h5py.File(ic_path, "a", driver="mpio", comm=MPI.COMM_WORLD)
             linfield = ics["DM_delta"]
 
-            delta_lin[:] = -linfield[rank * nmesh // size : (rank + 1) * nmesh // size, :, :].astype(
-                linfield.dtype
-            )
-            
+            delta_lin[:] = -linfield[
+                rank * nmesh // size : (rank + 1) * nmesh // size, :, :
+            ].astype(linfield.dtype)
+
             if cv:
                 psi_x = ics["DM_dx"]
                 psi_y = ics["DM_dy"]
-                psi_z = ics["DM_dz"]            
-    
+                psi_z = ics["DM_dz"]
+
                 p_x = newDistArray(fft, False, val=1)
                 p_y = newDistArray(fft, False, val=2)
                 p_z = newDistArray(fft, False, val=3)
@@ -53,19 +53,19 @@ def get_linear_field(ic_format, ic_path, nmesh, fft, cv=False):
                 ].astype(psi_y.dtype)
                 p_z[:] = psi_z[
                     rank * nmesh // size : (rank + 1) * nmesh // size, :, :
-                ].astype(psi_z.dtype)    
-            
+                ].astype(psi_z.dtype)
+
             ics.close()
-            
-        elif ic_format=='ngenic':
+
+        elif ic_format == "ngenic":
             linfield = np.load(ic_path + "linICfield.npy", mmap_mode="r")
-            delta_lin  = -linfield[rank * nmesh // size : (rank + 1) * nmesh // size, :, :].astype(
-                linfield.dtype
-            )
-            
-        elif ic_format=='abacus':
-            pass 
-        
+            delta_lin = -linfield[
+                rank * nmesh // size : (rank + 1) * nmesh // size, :, :
+            ].astype(linfield.dtype)
+
+        elif ic_format == "abacus":
+            pass
+
     except Exception as e:
         if configs["ic_format"] == "monofonic":
             print(
@@ -77,16 +77,18 @@ def get_linear_field(ic_format, ic_path, nmesh, fft, cv=False):
                 "Have you run ic_binary_to_field.py yet? Did not find the right file."
             )
         raise (e)
-    
+
     # Slab-decompose the noiseless ICs along the distributed array
 
     if cv:
         return delta_lin, p_x, p_y, p_z
     else:
         return delta_lin
-    
-    
-def filter_linear_fields(delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kcut, filt_ics_file):
+
+
+def filter_linear_fields(
+    delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kcut, filt_ics_file
+):
     d_filt = gaussian_filter(delta_lin, nmesh, Lbox, rank, size, fft, gaussian_kcut)
     del delta_lin
 
@@ -102,9 +104,7 @@ def filter_linear_fields(delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kc
             print(e)
             dset_delta = ics["DM_delta_filt"]
 
-        dset_delta[
-            rank * nmesh // size : (rank + 1) * nmesh // size, :, :
-        ] = d_filt[:]
+        dset_delta[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = d_filt[:]
         del d_filt
 
     p_x_filt = gaussian_filter(p_x, nmesh, Lbox, rank, size, fft, gaussian_kcut)
@@ -119,9 +119,7 @@ def filter_linear_fields(delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kc
             print(e)
             dset_dx = ics["DM_dx_filt"]
 
-        dset_dx[
-            rank * nmesh // size : (rank + 1) * nmesh // size, :, :
-        ] = p_x_filt[:]
+        dset_dx[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = p_x_filt[:]
         del p_x_filt
 
     p_y_filt = gaussian_filter(p_y, nmesh, Lbox, rank, size, fft, gaussian_kcut)
@@ -135,9 +133,7 @@ def filter_linear_fields(delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kc
             print(e)
             dset_dy = ics["DM_dy_filt"]
 
-        dset_dy[
-            rank * nmesh // size : (rank + 1) * nmesh // size, :, :
-        ] = p_y_filt[:]
+        dset_dy[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = p_y_filt[:]
         del p_y_filt
 
     p_z_filt = gaussian_filter(p_z, nmesh, Lbox, rank, size, fft, gaussian_kcut)
@@ -151,18 +147,17 @@ def filter_linear_fields(delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kc
             print(e)
             dset_dz = ics["DM_dz_filt"]
 
-        dset_dz[
-            rank * nmesh // size : (rank + 1) * nmesh // size, :, :
-        ] = p_z_filt[:]
+        dset_dz[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = p_z_filt[:]
         del p_z_filt
 
     delta_lin = newDistArray(fft, False)
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
         delta_lin[:] = ics["DM_delta_filt"][
             rank * nmesh // size : (rank + 1) * nmesh // size, :, :
-        ] 
-        
+        ]
+
     return delta_lin
+
 
 def MPI_mean(array, nmesh):
     """
@@ -174,7 +169,7 @@ def MPI_mean(array, nmesh):
         recvbuf = np.zeros(shape=[size, 1])
     comm.Gather(procsum, recvbuf, root=0)
     if rank == 0:
-        fieldmean = np.ones(1) * np.sum(recvbuf) / nmesh ** 3
+        fieldmean = np.ones(1) * np.sum(recvbuf) / nmesh**3
     else:
         fieldmean = np.ones(1)
     comm.Bcast(fieldmean, root=0)
@@ -208,7 +203,7 @@ def delta_to_tidesq(delta_k, nmesh, lbox, rank, size, fft):
     kvalsr = np.fft.rfftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
 
     kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
-    knorm = kx ** 2 + ky ** 2 + kz ** 2
+    knorm = kx**2 + ky**2 + kz**2
     if knorm[0][0][0] == 0:
         knorm[0][0][0] = 1
 
@@ -237,9 +232,9 @@ def delta_to_tidesq(delta_k, nmesh, lbox, rank, size, fft):
         if rank == 0:
             get_memory()
 
-        tidesq += 1.0 * real_out ** 2
+        tidesq += 1.0 * real_out**2
         if jvec[i][0] != jvec[i][1]:
-            tidesq += 1.0 * real_out ** 2
+            tidesq += 1.0 * real_out**2
 
         del fft_tide, real_out
         gc.collect()
@@ -271,7 +266,7 @@ def delta_to_gradsqdelta(delta_k, nmesh, lbox, rank, size, fft):
 
     kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
 
-    knorm = kx ** 2 + ky ** 2 + kz ** 2
+    knorm = kx**2 + ky**2 + kz**2
     if knorm[0][0][0] == 0:
         knorm[0][0][0] = 1
 
@@ -309,7 +304,7 @@ def gaussian_filter(field, nmesh, lbox, rank, size, fft, kcut):
     kvalsr = np.fft.rfftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
 
     kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
-    filter = np.exp(-(kx ** 2 + ky ** 2 + kz ** 2) / (2 * kcut ** 2))
+    filter = np.exp(-(kx**2 + ky**2 + kz**2) / (2 * kcut**2))
     fhat = filter * fhat
     del filter, kx, ky, kz
 
@@ -327,7 +322,7 @@ def compute_transfer_function(configs, z, k_in, p_in):
     h = configs["Cosmology"]["h"]
 
     p_cb_lin = np.array(
-        [pkclass.pk_cb_lin(k, np.array([z])) * h ** 3 for k in k_in * h]
+        [pkclass.pk_cb_lin(k, np.array([z])) * h**3 for k in k_in * h]
     )
     transfer = np.sqrt(p_cb_lin / p_in)
 
@@ -344,7 +339,7 @@ def apply_transfer_function(field, nmesh, lbox, rank, size, fft, k_t, transfer):
     kvalsr = np.fft.rfftfreq(nmesh) * (2 * np.pi * nmesh) / lbox
 
     kx, ky, kz = np.meshgrid(kvalsmpi, kvals, kvalsr)
-    k_norm = np.sqrt(kx ** 2 + ky ** 2 + kz ** 2)
+    k_norm = np.sqrt(kx**2 + ky**2 + kz**2)
     transfer_k = transfer_interp(k_norm)
     transfer_k[0][0][0] = 1
 
@@ -375,8 +370,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
         lindir = configs["icdir"]
     else:
         lindir = configs["outdir"]
-        
-    filt_ics_file = '/'.join(lindir.split('/')[:-1]) + '/filtered_ics.h5'
+
+    filt_ics_file = "/".join(lindir.split("/")[:-1]) + "/filtered_ics.h5"
 
     outdir = configs["outdir"]
     nmesh = configs["nmesh_in"]
@@ -391,37 +386,43 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                 gaussian_kcut = np.pi * nmesh / Lbox
             else:
                 gaussian_kcut = float(configs["surrogate_gaussian_cutoff"])
-                
-            print('gaussian_kcut:', gaussian_kcut, flush=True)
+
+            print("gaussian_kcut:", gaussian_kcut, flush=True)
     else:
         basename = "mpi_icfields_nmesh"
-        
-    #set up fft objects
+
+    # set up fft objects
     N = np.array([nmesh, nmesh, nmesh], dtype=int)
-    fft = PFFT(MPI.COMM_WORLD, N, axes=(0, 1, 2), dtype="float32", grid=(-1,))        
-    
+    fft = PFFT(MPI.COMM_WORLD, N, axes=(0, 1, 2), dtype="float32", grid=(-1,))
+
     # load linear density field (and displacements for surrogates)
     if not compute_cv_surrogate:
         delta_lin = get_linear_field(configs["ic_format"], lindir, nmesh, fft)
     else:
-        delta_lin, p_x, p_y, p_z = get_linear_field(configs["ic_format"], lindir, nmesh, fft, cv=True)
+        delta_lin, p_x, p_y, p_z = get_linear_field(
+            configs["ic_format"], lindir, nmesh, fft, cv=True
+        )
 
-    #We never apply scale dependent growth and compute cvs at the same time.
+    # We never apply scale dependent growth and compute cvs at the same time.
     if scale_dependent_growth:
         assert z is not None
         if rank == 0:
             print("Applying scale dependent growth transfer function", flush=True)
-        delta_lin = apply_scale_dependent_growth(delta_lin, nmesh, Lbox, rank, size, fft, configs, z)
-    
+        delta_lin = apply_scale_dependent_growth(
+            delta_lin, nmesh, Lbox, rank, size, fft, configs, z
+        )
+
     elif compute_cv_surrogate:
-        delta_lin = filter_linear_fields(delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kcut, filt_ics_file)
+        delta_lin = filter_linear_fields(
+            delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kcut, filt_ics_file
+        )
 
     d = newDistArray(fft, False)
     d[:] = delta_lin
     dmean = MPI_mean(d, nmesh)
     d -= dmean
-    
-    # Compute the delta^2 field. This operation is local in real space.  
+
+    # Compute the delta^2 field. This operation is local in real space.
     d2 = newDistArray(fft, False)
     d2[:] = delta_lin * delta_lin
     dmean = MPI_mean(d2, nmesh)
@@ -469,7 +470,7 @@ def make_lagfields(configs, save_to_disk=False, z=None):
             print("Wrote successfully! Now must convert to .npy files")
             print(time.time() - start_time, " seconds!")
             get_memory()
-            
+
             with h5py.File(outdir + "{}_{}.h5".format(basename, nmesh), "r") as f:
                 fkeys = list(f.keys())
                 for key in fkeys:
@@ -480,7 +481,7 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                     del arr
                     gc.collect()
                     get_memory()
-                    
+
             # Deletes the hdf5 file
             os.system("rm " + outdir + "{}_{}.h5".format(basename, nmesh))
 

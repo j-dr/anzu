@@ -1,4 +1,10 @@
-from .common_functions import load_particles, measure_pk, _get_resampler, CompensateInterlacedCICAliasing, CompensateCICAliasing
+from .common_functions import (
+    load_particles,
+    measure_pk,
+    _get_resampler,
+    CompensateInterlacedCICAliasing,
+    CompensateCICAliasing,
+)
 from classy import Class
 from mpi4py import MPI
 from glob import glob
@@ -29,6 +35,7 @@ def mpiprint(text, rank):
     else:
         pass
 
+
 def exchange(send_counts, send_offsets, recv_counts, recv_offsets, data, comm):
 
     newlength = recv_counts.sum()
@@ -55,7 +62,7 @@ def send_parts_to_weights(idvec, posvec, nmesh, comm, idfac, overload):
 
     nranks = comm.size
     # determine what rank each particles weight is on
-    a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh
+    a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh
     a_ic = a_ic.astype(int)
 
     slabs_per_rank = nmesh // nranks
@@ -96,7 +103,7 @@ def advect_fields(configs, lag_field_dict=None):
     fdir = configs["particledir"]
     componentdir = configs["outdir"]
     cv_surrogate = configs["compute_cv_surrogate"]
-    interlaced = configs.get('interlaced', False)
+    interlaced = configs.get("interlaced", False)
 
     H = Lbox / nmesh
 
@@ -115,7 +122,7 @@ def advect_fields(configs, lag_field_dict=None):
         basename = "mpi_icfields_nmesh"
         outname = "basis_spectra_nbody"
 
-    resampler_type = 'cic'
+    resampler_type = "cic"
     resampler = _get_resampler(resampler_type)
 
     if interlaced:
@@ -199,10 +206,9 @@ def advect_fields(configs, lag_field_dict=None):
             shifted = pm.affine.shift(0.5)
             field_interlaced = pm.create(type="real")
             field_interlaced[:] = 0
-            pm.paint(p, mass=w,
-                     resampler=resampler,
-                     out=field_interlaced,
-                     transform=shifted)
+            pm.paint(
+                p, mass=w, resampler=resampler, out=field_interlaced, transform=shifted
+            )
 
             c1 = fieldlist[0].r2c()
             c2 = field_interlaced.r2c()
@@ -240,9 +246,9 @@ def advect_fields(configs, lag_field_dict=None):
         posvec, idvec = send_parts_to_weights(
             idvec, posvec, nmesh, comm, idfac, overload
         )
-        a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh % (nmesh // nranks)
+        a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh % (nmesh // nranks)
     else:
-        a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh
+        a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh
 
     b_ic = (((idvec - idfac) // overload) // nmesh) % nmesh
     c_ic = ((idvec - idfac) // overload) % nmesh
@@ -251,7 +257,7 @@ def advect_fields(configs, lag_field_dict=None):
     gc.collect()
 
     # Figure out where each particle position is going to be distributed among mpi ranks
-    layout = pm.decompose(posvec, smoothing=factor*resampler.support)
+    layout = pm.decompose(posvec, smoothing=factor * resampler.support)
     p = layout.exchange(posvec)
 
     if lag_field_dict:
@@ -269,7 +275,7 @@ def advect_fields(configs, lag_field_dict=None):
         if keynames[k] == "1m":
             m = len(p)
             pass  # already handled this above
-            
+
         elif keynames[k] == "1cb":
             m = len(p)
             pm.paint(p, out=fieldlist[k], mass=1, resampler=resampler)
@@ -278,7 +284,13 @@ def advect_fields(configs, lag_field_dict=None):
                 field_interlaced[:] = 0
                 shifted = pm.affine.shift(0.5)
 
-                pm.paint(p, out=field_interlaced, mass=1, resampler=resampler, transform=shifted)
+                pm.paint(
+                    p,
+                    out=field_interlaced,
+                    mass=1,
+                    resampler=resampler,
+                    transform=shifted,
+                )
 
                 c1 = fieldlist[k].r2c()
                 c2 = field_interlaced.r2c()
@@ -323,7 +335,13 @@ def advect_fields(configs, lag_field_dict=None):
                 field_interlaced = pm.create(type="real")
                 field_interlaced[:] = 0
                 shifted = pm.affine.shift(0.5)
-                pm.paint(p, out=field_interlaced, mass=m, resampler=resampler, transform=shifted)
+                pm.paint(
+                    p,
+                    out=field_interlaced,
+                    mass=m,
+                    resampler=resampler,
+                    transform=shifted,
+                )
 
                 c1 = fieldlist[k].r2c()
                 c2 = field_interlaced.r2c()
@@ -340,7 +358,6 @@ def advect_fields(configs, lag_field_dict=None):
 
     del p
     gc.collect()
-
 
     # Normalize and mean-subtract the normal particle field.
     fieldlist[0] = fieldlist[0] / fieldlist[0].cmean() - 1
@@ -369,15 +386,18 @@ def advect_fields(configs, lag_field_dict=None):
                 )
 
         if compensate:
-            fieldlist[k] = fieldlist[k].r2c()            
+            fieldlist[k] = fieldlist[k].r2c()
             if not interlaced:
-                fieldlist[k] = fieldlist[k].apply(CompensateCICAliasing, kind="circular")
+                fieldlist[k] = fieldlist[k].apply(
+                    CompensateCICAliasing, kind="circular"
+                )
             else:
-                fieldlist[k] = fieldlist[k].apply(CompensateInterlacedCICAliasing, kind="circular")                
+                fieldlist[k] = fieldlist[k].apply(
+                    CompensateInterlacedCICAliasing, kind="circular"
+                )
         else:
             if not interlaced:
                 fieldlist[k] = fieldlist[k].r2c()
-            
 
     sys.stdout.flush()
     #######################################################################################################################
@@ -392,11 +412,11 @@ def advect_fields(configs, lag_field_dict=None):
             r"$s^2$",
             r"$\nabla^2\delta$",
         ]
-        field_D = [1, 1, D, D ** 2, D ** 2, D]
+        field_D = [1, 1, D, D**2, D**2, D]
 
     else:
         labelvec = ["1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
-        field_D = [1, D, D ** 2, D ** 2, D]
+        field_D = [1, D, D**2, D**2, D]
 
     if configs["scale_dependent_growth"]:
         field_D = [1, 1, 1, 1, 1, 1]
@@ -415,7 +435,7 @@ def measure_basis_spectra(
     zbox,
     field_dict2=None,
     field_D2=None,
-    save=True
+    save=True,
 ):
     nmesh = configs["nmesh_in"]
     Lbox = configs["lbox"]
@@ -479,7 +499,7 @@ def measure_basis_spectra(
                 ),
                 kpkvec,
             )
-        pk_auto_vec = copy(kpkvec)            
+        pk_auto_vec = copy(kpkvec)
     else:
         pk_auto_vec = copy(kpkvec)
 
@@ -517,11 +537,13 @@ def measure_basis_spectra(
                     ),
                     kpkvec,
                 )
-        mpiprint("measuring cross spectra took {}s".format(time.time() - start_time), rank)
-        
+        mpiprint(
+            "measuring cross spectra took {}s".format(time.time() - start_time), rank
+        )
+
     return pk_auto_vec, kpkvec
-            
-    
+
+
 def advect_fields_and_measure_spectra(
     config, lag_field_dict=None, field_dict2=None, field_D2=None
 ):
