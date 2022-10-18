@@ -241,8 +241,10 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                 gaussian_kcut = np.pi * nmesh / Lbox
             else:
                 gaussian_kcut = float(configs["surrogate_gaussian_cutoff"])
-                
-            print('gaussian_kcut:', gaussian_kcut, flush=True)
+        else:
+            gaussian_kcut = None
+            if rank==0:
+                print('gaussian_kcut:', gaussian_kcut, flush=True)
     else:
         basename = "mpi_icfields_nmesh"
 
@@ -260,14 +262,15 @@ def make_lagfields(configs, save_to_disk=False, z=None):
             bigmesh = np.load(lindir + "linICfield.npy", mmap_mode="r")
     except Exception as e:
         if configs["ic_format"] == "monofonic":
-            print(
-                "Couldn't find {}. Make sure you've produced  \\\
-                   with generic output format."
-            )
-        else:
-            print(
-                "Have you run ic_binary_to_field.py yet? Did not find the right file."
-            )
+            if rank==0:
+                print(
+                    "Couldn't find {}. Make sure you've produced  \\\
+                    with generic output format."
+                )
+            else:
+                print(
+                    "Have you run ic_binary_to_field.py yet? Did not find the right file."
+                )
         raise (e)
 
     N = np.array([nmesh, nmesh, nmesh], dtype=int)
@@ -287,7 +290,7 @@ def make_lagfields(configs, save_to_disk=False, z=None):
     d = newDistArray(fft, False)
     d[:] = u
 
-    if compute_cv_surrogate:
+    if (compute_cv_surrogate) & (gaussian_kcut is not None):
         u_filt = gaussian_filter(u, nmesh, Lbox, rank, nranks, fft, gaussian_kcut)
         del u
 
@@ -315,7 +318,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                     "DM_delta_filt", (nmesh, nmesh, nmesh), dtype=u_filt.dtype
                 )
             except Exception as e:
-                print(e)
+                if rank==0:
+                    print(e)
                 dset_delta = ics["DM_delta_filt"]
 
             dset_delta[
@@ -332,7 +336,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                     "DM_dx_filt", (nmesh, nmesh, nmesh), dtype=psi_x.dtype
                 )
             except Exception as e:
-                print(e)
+                if rank==0:
+                    print(e)
                 dset_dx = ics["DM_dx_filt"]
 
             dset_dx[
@@ -348,7 +353,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                     "DM_dy_filt", (nmesh, nmesh, nmesh), dtype=psi_y.dtype
                 )
             except Exception as e:
-                print(e)
+                if rank==0:
+                    print(e)
                 dset_dy = ics["DM_dy_filt"]
 
             dset_dy[
@@ -364,7 +370,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                     "DM_dz_filt", (nmesh, nmesh, nmesh), dtype=psi_z.dtype
                 )
             except Exception as e:
-                print(e)
+                if rank==0:
+                    print(e)
                 dset_dz = ics["DM_dz_filt"]
 
             dset_dz[
@@ -448,53 +455,6 @@ def make_lagfields(configs, save_to_disk=False, z=None):
 
     fieldnames = ["delta", "deltasq", "tidesq", "nablasq"]
     lag_field_dict = dict(zip(fieldnames, [d, d2, v, ns]))
-
-    weight_arr = []
-    weight2_arr = []
-
-    for i in range(len(fieldnames)+1):
-        if i==0:
-            m_i = 1
-        else:
-            m_i = lag_field_dict[fieldnames[i-1]].v
-
-        if i==0:
-            w = nmesh**3
-        else:
-            w = comm.allreduce(np.sum(m_i))
-            
-        weight_arr.append(w)
-            
-        for j in range(len(fieldnames)+1):
-            if (i<j): continue
-
-            if j==0:
-                m_j = 1
-            else:
-                m_j = lag_field_dict[fieldnames[j-1]].v
-
-            if (i==0) & (j==0):
-                w2 = nmesh**3
-            else:
-                w2 = comm.allreduce(np.sum(m_i * m_j))
-                
-            if rank==0:
-                print(w2)
-                
-            weight2_arr.append(w2)
-
-
-    if rank==0:
-        neff = []
-        counter = 0
-        for i in range(len(fieldnames)+1):
-            for j in range(len(fieldnames)+1):
-                if (i < j): continue
-                neff.append(weight2_arr[counter] / (weight_arr[i]  * weight_arr[j]))
-                print(neff)
-                counter += 1
-
-        np.save(outdir + "{}_neff_nmesh{}.npy".format(basename, nmesh), neff)
 
     return lag_field_dict
 

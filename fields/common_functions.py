@@ -217,7 +217,9 @@ def load_particles(
     boltz=None,
     z_ic=None,
     rsd=False,
-    z_this=None
+    z_this=None,
+    Dic=None,
+    gaussian_cutoff=True
 ):
 
     if not cv_surrogate:
@@ -248,7 +250,12 @@ def load_particles(
         assert lbox is not None
 
     D = boltz.scale_independent_growth_factor(z_this)
-    D = D / boltz.scale_independent_growth_factor(z_ic)
+
+    if Dic is None:
+        D = D / boltz.scale_independent_growth_factor(z_ic)
+    else:
+        D = D / Dic
+        
     Ha = boltz.Hubble(z_this) * 299792.458
     
     if rsd:
@@ -314,6 +321,10 @@ def load_particles(
         if ic_format == "monofonic":
             n_ = [nmesh, nmesh, nmesh]
             get_cell_idx = lambda i, j, k: (i * n_[1] + j) * n_[2] + k
+            if gaussian_cutoff:
+                postfix = '_filt'
+            else:
+                postfix = ''
             with h5py.File(icfile, "r") as ics:
                 # read in displacements, rescale by D=D(z_this)/D(z_ini)
                 grid = np.meshgrid(
@@ -323,13 +334,13 @@ def load_particles(
                     indexing="ij",
                 )
                 pos_x = (
-                    (grid[0] / nmesh + D * ics["DM_dx_filt"][rank::size, ...]) % 1
+                    (grid[0] / nmesh + D * ics["DM_dx{}".format(postfix)][rank::size, ...]) % 1
                 ) * lbox
                 pos_y = (
-                    (grid[1] / nmesh + D * ics["DM_dy_filt"][rank::size, ...]) % 1
+                    (grid[1] / nmesh + D * ics["DM_dy{}".format(postfix)][rank::size, ...]) % 1
                 ) * lbox
                 pos_z = (
-                    (grid[2] / nmesh + D * (1 + f) * ics["DM_dz_filt"][rank::size, ...]) % 1
+                    (grid[2] / nmesh + D * (1 + f) * ics["DM_dz{}".format(postfix)][rank::size, ...]) % 1
                 ) * lbox
 
                 pos = np.stack([pos_x, pos_y, pos_z])

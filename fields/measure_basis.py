@@ -127,11 +127,14 @@ def advect_fields(configs, lag_field_dict=None):
         rsd = configs["rsd"]
     except:
         rsd = False
-
+    filt = configs.get('surrogate_gaussian_cutoff', True)
     # don't use neutrinos for CV surrogate. cb field should be fine.
     if cv_surrogate:
         use_neutrinos = False
-        basename = "mpi_icfields_nmesh_filt"
+        if filt:
+            basename = "mpi_icfields_nmesh_filt"
+        else:
+            basename = "mpi_icfields_nmesh"
         outname = "basis_spectra_za_surrogate"
     else:
         use_neutrinos = configs["use_neutrinos"]
@@ -168,6 +171,13 @@ def advect_fields(configs, lag_field_dict=None):
     pkclass.set(configs["Cosmology"])
     pkclass.compute()
     z_ic = configs["z_ic"]
+    Dic = configs.get('Dic', None)
+
+    kcut = configs.get('surrogate_gaussian_cutoff', None)
+    if kcut is not None:
+        gaussian_cutoff = True
+    else:
+        gaussian_cutoff = False
 
     # Load in a subset of the total gadget snapshot.
     posvec, idvec, npart_this, zbox, m_cb, D = load_particles(
@@ -183,6 +193,8 @@ def advect_fields(configs, lag_field_dict=None):
         lbox=configs["lbox"],
         z_ic=z_ic,
         rsd=rsd,
+        Dic=Dic,
+        gaussian_cutoff=gaussian_cutoff
     )
 
     # if use_neutrinos=True, compute an additional set of basis spectra,
@@ -199,6 +211,7 @@ def advect_fields(configs, lag_field_dict=None):
             z_ic=z_ic,
             lbox=configs["lbox"],
             rsd=rsd,
+            Dic=Dic
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
         del posvec_nu

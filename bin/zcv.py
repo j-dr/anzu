@@ -202,12 +202,16 @@ if __name__ == "__main__":
     Lbox = float(config['lbox'])    
     linear_surrogate = config.get('linear_surrogate', False)
     measure_cross_spectra = config.get('measure_cross_spectra', True)
+    filt = config.get('surrogate_gaussian_cutoff', True)
 
     resampler_type = 'cic'
     resampler = _get_resampler(resampler_type)
-    
+
     if config['compute_cv_surrogate']:
-        basename = "mpi_icfields_nmesh_filt"
+        if filt:
+            basename = "mpi_icfields_nmesh_filt"
+        else:
+            basename = "mpi_icfields_nmesh"
     else:
         basename = "mpi_icfields_nmesh"
         
@@ -223,7 +227,6 @@ if __name__ == "__main__":
             M = np.load(M_file)
         else:
             M = None
-            
 
     if config['scale_dependent_growth']:
         z = get_snap_z(config["particledir"], config["sim_type"])
@@ -264,7 +267,7 @@ if __name__ == "__main__":
         stype = 'z'
     else:
         stype = 'heft'
-    
+
     for ii, tracer_file in enumerate(tracer_files):
 
         if linear_surrogate and (len(tracer_files)>1):
