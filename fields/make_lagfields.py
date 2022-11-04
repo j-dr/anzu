@@ -247,6 +247,7 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                 print('gaussian_kcut:', gaussian_kcut, flush=True)
     else:
         basename = "mpi_icfields_nmesh"
+        gaussian_kcut = None
 
     # load linear density field (and displacements for surrogates)
     try:

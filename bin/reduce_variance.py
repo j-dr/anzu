@@ -355,7 +355,6 @@ def lpt_spectra(k, z, anzu_config, kin, p_lin_in, pkclass=None):
     else:
         cutoff = 10
 
-#    cutoff = np.pi * cfg["nmesh_in"] / cfg["lbox"]
     kt = np.logspace(-3, 1, 100)
 
     pk_cb_lin = np.array(
@@ -390,7 +389,6 @@ def lpt_spectra(k, z, anzu_config, kin, p_lin_in, pkclass=None):
     pk_m_3lpt = cleft_m_spline(k)
 
     return pk_zenbu[1:], pk_m_3lpt[1:12], pk_cb_3lpt[1:12], pkclass
-
 
 def reduce_variance(
     k,
@@ -448,7 +446,6 @@ def reduce_variance(
 
 def reduce_variance_fullsim(configbase, rsd=False):
 
-
     with open("{}/anzu_fields.param".format(configbase), "r") as fp:
         cfg = yaml.load(fp, Loader=Loader)
 
@@ -478,7 +475,6 @@ def reduce_variance_fullsim(configbase, rsd=False):
     pk_ij_nz_all = np.zeros((len(a_all), 14, 699))
     beta_ij_all = np.zeros((len(a_all), 14, 699))
     beta_ij_smooth_all = np.zeros((len(a_all), 14, 699))
-
     anzu_config = configbase + "anzu_fields.param"
 
     s_m_map = {0: 0, 2: 1, 5: 3, 9: 6}
@@ -486,6 +482,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
 
     for j, a_this in enumerate(np.array(a_all)):
         print('working on snapshot {}'.format(j), flush=True)
+
         pk_zz_fname = (
             basename
             + "basis_spectra_za_surrogate_pk_rsd=False_pypower=True_a{:.4f}_nmesh1400.npy".format(
