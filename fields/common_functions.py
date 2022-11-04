@@ -403,8 +403,9 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
         pkdict["shotnoise"] = pk.poles.shotnoise_nonorm
 
     else:
+        dk = 2 * np.pi / lbox
         pk = FFTPower(
-            mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, poles=poles
+            mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, poles=poles, dk=dk, kmin=dk
         )
 
         pkdict["k"] = pk.power["k"].real
