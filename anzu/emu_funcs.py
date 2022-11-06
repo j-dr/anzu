@@ -58,7 +58,8 @@ class LPTEmulator(object):
         tanh=True,
         kecleft=False,
         hyperparams=None,
-        aemulus_alpha_settings=False
+        aemulus_alpha_settings=False,
+        omega_cb_bounds=None
     ):
         """
         Initialize the emulator object. Default values for all kwargs were
@@ -163,6 +164,7 @@ class LPTEmulator(object):
         else:
             self.nspec = 14
         self.aemulus_alpha_settings = aemulus_alpha_settings
+        self.omega_cb_bounds = omega_cb_bounds
 
         self.param_mean = None
         self.param_mult = None
@@ -488,6 +490,15 @@ class LPTEmulator(object):
                     cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
 
+        if self.omega_cb_bounds is not None:
+            if self.use_physical_densities:
+                om = (cosmos['ombh2'] + cosmos['omch2']) / (cosmos['H0']/100)**2
+            else:
+                om = cosmos['omegam']
+            
+            idx = (self.omega_cb_bounds[0] < om) & (om < self.omega_cb_bounds[-1])
+            cosmos = cosmos[idx]
+            
         param_ranges = np.array(
             [[np.min(cosmos[k]), np.max(cosmos[k])] for k in cosmos.dtype.names]
         )
