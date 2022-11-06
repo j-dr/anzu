@@ -498,6 +498,7 @@ class LPTEmulator(object):
             
             idx = (self.omega_cb_bounds[0] < om) & (om < self.omega_cb_bounds[-1])
             cosmos = cosmos[idx]
+            ncosmos = len(cosmos)
             
         param_ranges = np.array(
             [[np.min(cosmos[k]), np.max(cosmos[k])] for k in cosmos.dtype.names]
