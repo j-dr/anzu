@@ -58,6 +58,7 @@ class LPTEmulator(object):
         tanh=True,
         kecleft=False,
         hyperparams=None,
+        aemulus_alpha_settings=False
     ):
         """
         Initialize the emulator object. Default values for all kwargs were
@@ -157,7 +158,11 @@ class LPTEmulator(object):
         self.kmin_pl = kmin_pl
         self.kmax_pl = kmax_pl
         self.forceLPT = forceLPT
-        self.nspec = 14
+        if aemulus_alpha_settings:
+            self.nspec = 10
+        else:
+            self.nspec = 14
+        self.aemulus_alpha_settings = aemulus_alpha_settings
 
         self.param_mean = None
         self.param_mult = None
@@ -358,7 +363,7 @@ class LPTEmulator(object):
             axis=1,
             fill_value="extrapolate",
         )
-
+        self.vars_spec = vars_spec
         self.pcs_spec = self._get_pcs(self.evec_spec, simoverlpt, self.npc)
         self.pcs_spec_normed, self.pcs_mean, self.pcs_mult = norm(self.pcs_spec)
 
@@ -400,7 +405,11 @@ class LPTEmulator(object):
                 cosmos_temp["ns"] = cosmos["ns"]
                 cosmos_temp["As"] = cosmos["As"]
                 cosmos_temp["H0"] = cosmos["H0"]
-                cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                if self.aemulus_alpha_settings:
+                    cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
+                    
+                else:
+                    cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
             else:
                 dt = np.dtype(
@@ -423,7 +432,10 @@ class LPTEmulator(object):
                 cosmos_temp["ns"] = cosmos["ns"]
                 cosmos_temp["sigma8"] = cosmos["sigma8"]
                 cosmos_temp["H0"] = cosmos["H0"]
-                cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                if self.aemulus_alpha_settings:
+                    cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
+                else:                    
+                    cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
         else:
             if not self.use_sigma_8:
@@ -445,7 +457,10 @@ class LPTEmulator(object):
                 cosmos_temp["ns"] = cosmos["ns"]
                 cosmos_temp["As"] = cosmos["As"]
                 cosmos_temp["H0"] = cosmos["H0"]
-                cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                if self.aemulus_alpha_settings:
+                    cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
+                else:                    
+                    cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
 
             else:
@@ -467,7 +482,10 @@ class LPTEmulator(object):
                 cosmos_temp["ns"] = cosmos["ns"]
                 cosmos_temp["sigma8"] = cosmos["sigma8"]
                 cosmos_temp["H0"] = cosmos["H0"]
-                cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                if self.aemulus_alpha_settings:
+                    cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
+                else:                    
+                    cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
 
         param_ranges = np.array(
