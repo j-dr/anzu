@@ -147,6 +147,9 @@ class LPTEmulator(object):
             self.zs = np.array([3.0, 2.0, 1.0, 0.85, 0.7, 0.55, 0.4, 0.25, 0.1, 0.0])
         else:
             self.zs = zs
+            
+        self.zidx = np.min(np.where(self.zs <= self.zmax))
+        self.nz = len(self.zs[self.zidx :])            
 
         self.smooth_spectra = smooth_spectra
         self.window = window
@@ -267,9 +270,6 @@ class LPTEmulator(object):
 
         simoverlpt = np.log10(simoverlpt)
         simoverlpt[~np.isfinite(simoverlpt)] = 0
-
-        self.zidx = np.min(np.where(self.zs <= self.zmax))
-        self.nz = len(self.zs[self.zidx :])
 
         self.kmax_idx = np.searchsorted(self.k, self.kmax)
         self.kmin_idx = np.searchsorted(self.k, self.kmin)
