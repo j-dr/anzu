@@ -59,7 +59,7 @@ class LPTEmulator(object):
         kecleft=False,
         hyperparams=None,
         aemulus_alpha_settings=False,
-        omega_cb_bounds=None
+        param_bound_dict=None
     ):
         """
         Initialize the emulator object. Default values for all kwargs were
@@ -168,7 +168,7 @@ class LPTEmulator(object):
         else:
             self.nspec = 14
         self.aemulus_alpha_settings = aemulus_alpha_settings
-        self.omega_cb_bounds = omega_cb_bounds
+        self.param_bound_dict = param_bound_dict
 
         self.param_mean = None
         self.param_mult = None
