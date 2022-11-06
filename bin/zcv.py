@@ -198,7 +198,8 @@ if __name__ == "__main__":
         tracer_files= [config['tracer_file']]
         
     kmax = np.atleast_1d(config['field_level_kmax'])
-    nmesh = int(config['nmesh_out'])
+    nmesh = int(config['nmesh_in'])
+    nmesh_out = int(config['nmesh_out'])
     Lbox = float(config['lbox'])    
     linear_surrogate = config.get('linear_surrogate', False)
     measure_cross_spectra = config.get('measure_cross_spectra', True)
@@ -253,7 +254,7 @@ if __name__ == "__main__":
         pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(config, lag_field_dict=lag_field_dict)
     else:
         pm = pmesh.pm.ParticleMesh(
-            [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler=resampler, comm=comm
+            [nmesh_out, nmesh_out, nmesh_out], Lbox, dtype="float32", resampler=resampler, comm=comm
         )
         if len(tracer_files)==1:
             field_dict, field_D, zbox = get_linear_field(config, lag_field_dict, rank, size, nmesh, bias_vec=bias_vec[0])
@@ -287,7 +288,7 @@ if __name__ == "__main__":
         del tracer_pos, p
         
         #measure tracer auto-power
-        pk_tt_dict = measure_pk(tracerfield, tracerfield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
+        pk_tt_dict = measure_pk(tracerfield, tracerfield, Lbox, nmesh_out, config['rsd'], config['use_pypower'], 1, 1)
     
         field_dict2 = {'t':tracerfield}
         field_D2 = [1]
@@ -295,7 +296,7 @@ if __name__ == "__main__":
         np.save(
             lindir
             + "{}_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+                tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh_out
             ),
             [pk_tt_dict],
         )
@@ -317,7 +318,7 @@ if __name__ == "__main__":
             np.save(
                 lindir
                 + "{}cv_surrogate_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
-                                                                                        config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+                                                                                        config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh_out
                 ),
                 pk_auto_vec,
             )    
@@ -326,7 +327,7 @@ if __name__ == "__main__":
             np.save(
                 lindir
                 + "{}cv_cross_{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype,
-                                                                                  tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh
+                                                                                  tracer_file.split('/')[-1], config['rsd'], config['use_pypower'], 1 / (zbox + 1), nmesh_out
                 ),
                 pk_cross_vec,
             )        
@@ -341,7 +342,7 @@ if __name__ == "__main__":
                     field_D = field_D[1:]
                 else:
                     dm = None
-                M, A, bv, zafield = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, kmax, Lbox, M=M)
+                M, A, bv, zafield = measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh_out, kmax, Lbox, M=M)
 
                 if dm is not None:
                     field_dict['1m'] = dm
@@ -367,17 +368,17 @@ if __name__ == "__main__":
                         continue
 
             eps = tracerfield - zafield
-            pk_ee = measure_pk(eps, eps, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
-            pk_zz_fl = measure_pk(zafield, zafield, Lbox, nmesh, config['rsd'], config['use_pypower'], 1, 1)
+            pk_ee = measure_pk(eps, eps, Lbox, nmesh_out, config['rsd'], config['use_pypower'], 1, 1)
+            pk_zz_fl = measure_pk(zafield, zafield, Lbox, nmesh_out, config['rsd'], config['use_pypower'], 1, 1)
 
             np.save(
                 lindir
-                + "{}cv_surrogate_{}_resid_pk_rsd={}_kmax{:0.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
+                + "{}cv_surrogate_{}_resid_pk_rsd={}_kmax{:0.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh_out),
                 [pk_ee],
             )
             np.save(
                 lindir
-                + "{}cv_surrogate_{}_fieldsum_pk_rsd={}_kmax{:.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh),
+                + "{}cv_surrogate_{}_fieldsum_pk_rsd={}_kmax{:.4f}_opmax{}_pypower={}_a{:.4f}_nmesh{}.npy".format(stype, tracer_file.split('/')[-1], config['rsd'], kmax[0], 4, config['use_pypower'], 1 / (zbox + 1), nmesh_out),
                 [pk_zz_fl],
             )
                     
