@@ -275,7 +275,7 @@ class LPTEmulator(object):
         self.kmin_idx = np.searchsorted(self.k, self.kmin)
         self.nk = self.kmax_idx - self.kmin_idx
 
-        simoverlpt = simoverlpt[:, self.zidx :, :, self.kmin_idx : self.kmax_idx]
+        simoverlpt = simoverlpt[self.cb_idx, self.zidx :, :, self.kmin_idx : self.kmax_idx]
 
         return simoverlpt
 
@@ -496,9 +496,12 @@ class LPTEmulator(object):
             else:
                 om = cosmos['omegam']
             
-            idx = (self.omega_cb_bounds[0] < om) & (om < self.omega_cb_bounds[-1])
-            cosmos = cosmos[idx]
+            cb_idx = (self.omega_cb_bounds[0] < om) & (om < self.omega_cb_bounds[-1])
+            cosmos = cosmos[cb_idx]
+            self.cb_idx = cb_idx
             ncosmos = len(cosmos)
+        else:
+            self.cb_idx = np.ones(ncosmos, dtype=bool)
             
         param_ranges = np.array(
             [[np.min(cosmos[k]), np.max(cosmos[k])] for k in cosmos.dtype.names]
@@ -727,8 +730,9 @@ class LPTEmulator(object):
         spectra_aem = spectra_aem[idx]
         spectra_lpt = spectra_lpt[idx]
 
-        self._setup_training_data(spectra_lpt, spectra_aem)
         self.design, self.design_scaled = self._setup_design(self.training_cosmo_file)
+        self._setup_training_data(spectra_lpt, spectra_aem)
+        
         self._train_surrogates()
 
         self.trained = True
