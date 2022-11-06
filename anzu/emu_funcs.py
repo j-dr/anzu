@@ -495,7 +495,7 @@ class LPTEmulator(object):
             idx = np.ones(ncosmos, dtype=bool)
             
             for k in self.param_bound_dict.keys():
-                idx &= (self.param_bound_dict[k][0]<cosmos[k]) & (cosmos[k] < self.param_bound_dict[k][0])
+                idx &= (self.param_bound_dict[k][0]<cosmos[k]) & (cosmos[k] < self.param_bound_dict[k][1])
 
             cosmos = cosmos[idx]
             self.training_idx = idx
