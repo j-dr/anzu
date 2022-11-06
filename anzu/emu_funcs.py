@@ -147,15 +147,16 @@ class LPTEmulator(object):
             self.zs = np.array([3.0, 2.0, 1.0, 0.85, 0.7, 0.55, 0.4, 0.25, 0.1, 0.0])
         else:
             self.zs = zs
-            
+        
+        self.usez = usez
+        self.zmax = zmax            
         self.zidx = np.min(np.where(self.zs <= self.zmax))
         self.nz = len(self.zs[self.zidx :])            
 
         self.smooth_spectra = smooth_spectra
         self.window = window
         self.savgol_order = savgol_order
-        self.usez = usez
-        self.zmax = zmax
+
         self.kmin = kmin
         self.kmax = kmax
         self.extrap = extrap
