@@ -455,7 +455,7 @@ def reduce_variance(
         pk_m_3lpt,
         pk_cb_3lpt,
         pk_m_ke3lpt,
-        pk_cb_ke3lpt        
+        pk_cb_ke3lpt,
         pkclass,
         kecleftobj_m, 
         kecleftobj_cb         
