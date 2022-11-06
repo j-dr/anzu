@@ -383,12 +383,16 @@ def lpt_spectra(k, z, anzu_config, kin, p_lin_in, pkclass=None):
 
     cleft_m_spline, cleftobj = _cleft_pk(kt, pk_m_lin, kecleft=False)
     cleft_cb_spline, cleftobj = _cleft_pk(kt, pk_cb_lin_zb, kecleft=False)
+    kecleft_m_spline, kecleftobj_m = _cleft_pk(kt, pk_m_lin_z0, D=Dthis, kecleft=True, cleftobj=kecleftobj_m)
+    kecleft_cb_spline, kecleftobj_cb = _cleft_pk(kt, pk_cb_lin_zb_z0, D=Dthis, kecleft=True, cleftobj=kecleftobj_cb)
 
     pk_zenbu = zbspline(k)
     pk_cb_3lpt = cleft_cb_spline(k)
     pk_m_3lpt = cleft_m_spline(k)
+    pk_cb_ke3lpt = cleft_cb_spline(k)
+    pk_m_ke3lpt = cleft_m_spline(k)
 
-    return pk_zenbu[1:], pk_m_3lpt[1:12], pk_cb_3lpt[1:12], pkclass
+    return pk_zenbu[1:], pk_m_3lpt[1:12], pk_cb_3lpt[1:12], pk_m_ke3lpt[1:12], pk_cb_ke3lpt[1:12], pkclass, kecleftobj_m, kecleftobj_cb
 
 def reduce_variance(
     k,
@@ -401,11 +405,14 @@ def reduce_variance(
     p_lin_in,
     neutrinos=True,
     pkclass=None,
+    kecleftobj_m=None,
+    kecleftobj_cb=None
 ):
 
-    pk_ij_zenbu, pk_m_3lpt, pk_cb_3lpt, pkclass = lpt_spectra(
-        k, z, anzu_config, kt, p_lin_in, pkclass=pkclass
-    )
+
+    pk_ij_zenbu, pk_m_3lpt, pk_cb_3lpt, pk_m_ke3lpt, pk_cb_ke3lpt, pkclass, kecleftobj_m, kecleftobj_cb = lpt_spectra(
+        k, z, anzu_config, kt, p_lin_in, pkclass=pkclass, kecleftobj_m=kecleftobj_m, kecleftobj_cb=kecleftobj_cb)
+
     (
         pk_ij_nn_hat,
         pk_ij_nn_smooth,
@@ -468,6 +475,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
     pk_ij_smooth = np.zeros((len(a_all), 14, 699))
     pk_ij_beta1 = np.zeros((len(a_all), 14, 699))
     pk_ij_3lpt = np.zeros((len(a_all), 14, 699))
+    pk_ij_ke3lpt = np.zeros((len(a_all), 14, 699))    
     pk_ij_zenbu = np.zeros((len(a_all), 14, 699))
     pk_ij_zz_all = np.zeros((len(a_all), 14, 699))
     pk_ij_nn_all = np.zeros((len(a_all), 14, 699))
@@ -479,6 +487,9 @@ def reduce_variance_fullsim(configbase, rsd=False):
 
     s_m_map = {0: 0, 2: 1, 5: 3, 9: 6}
     s_cb_map = {1: 0, 3: 1, 4: 2, 6: 3, 7: 4, 8: 5, 10: 6, 11: 7, 12: 8, 13: 9}
+    pkclass = None
+    kecleftobj_m = None
+    kecleftobj_cb = None
 
     for j, a_this in enumerate(np.array(a_all)):
         print('working on snapshot {}'.format(j), flush=True)
@@ -520,6 +531,8 @@ def reduce_variance_fullsim(configbase, rsd=False):
             pk_m_3lpt,
             pk_cb_3lpt,
             pkclass,
+            kecleftobj_m,
+            kecleftobj_cb,
         ) = reduce_variance(
             k,
             pk_ij_nn[..., 0],
@@ -529,6 +542,9 @@ def reduce_variance_fullsim(configbase, rsd=False):
             z_this,
             p_in[:, 0],
             p_in[:, 1] * (2 * np.pi) ** 3,
+            pkclass=pkclass,
+            kecleftobj_m=kecleftobj_m,
+            kecleftobj_cb=kecleftobj_cb
         )
 
         for s in np.arange(len(pk_ij_nn_hat)):
@@ -549,6 +565,11 @@ def reduce_variance_fullsim(configbase, rsd=False):
             else:
                 pk_ij_3lpt[j, s, :] = pk_cb_3lpt[s_cb_map[s]]
 
+            if s in [0, 2, 5, 9]:
+                pk_ij_ke3lpt[j, s, :] = pk_m_ke3lpt[s_m_map[s]]
+            else:
+                pk_ij_ke3lpt[j, s, :] = pk_cb_ke3lpt[s_cb_map[s]]
+                
     np.save("{}/pk_ij_nn_hat_noexp_damp.npy".format(basename), pk_ij_hat)
     np.save("{}/pk_ij_nn_smooth_noexp_damp.npy".format(basename), pk_ij_smooth)
     np.save("{}/pk_ij_nn_beta1_noexp_damp.npy".format(basename), pk_ij_beta1)
@@ -560,12 +581,12 @@ def reduce_variance_fullsim(configbase, rsd=False):
     np.save("{}/beta_ij_smooth_noexp_damp.npy".format(basename), beta_ij_smooth_all)
     np.save("{}/pk_ij_zenbu_noexp_damp.npy".format(basename), pk_ij_zenbu)
     np.save("{}/pk_ij_3lpt_noexp_damp.npy".format(basename), pk_ij_3lpt)
+    np.save("{}/pk_ij_ke3lpt_noexp_damp.npy".format(basename), pk_ij_ke3lpt)    
     
 
 if __name__ == "__main__":
 
     rsd = sys.argv[1]
-#    print('rsd', rsd, flush=True)
     configbases = sys.argv[2:]
 
     rank = MPI.COMM_WORLD.rank
