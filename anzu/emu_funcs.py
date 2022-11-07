@@ -5,7 +5,7 @@ import chaospy as cp
 import warnings
 import GPy
 
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, RectBivariateSpline
 from scipy.signal import savgol_filter
 
 
@@ -59,7 +59,8 @@ class LPTEmulator(object):
         kecleft=False,
         hyperparams=None,
         aemulus_alpha_settings=False,
-        param_bound_dict=None
+        param_bound_dict=None,
+        zpc=False
     ):
         """
         Initialize the emulator object. Default values for all kwargs were
@@ -121,19 +122,19 @@ class LPTEmulator(object):
         """
 
         if nbody_training_data_file is None:
-            nbody_training_data_file = "spectra_aem_compensated_43.npy"
+            nbody_training_data_file = "spectra_aem_compensated.npy"
 
         if lpt_training_data_file is None:
             if kecleft:
-                lpt_training_data_file = "kecleft_spectra_43.npy"
+                lpt_training_data_file = "kecleft_spectra.npy"
             else:
-                lpt_training_data_file = "cleft_spectra_43.npy"
+                lpt_training_data_file = "cleft_spectra.npy"
 
         if kbin_file is None:
             kbin_file = "kbins.npy"
 
         if training_cosmo_file is None:
-            training_cosmo_file = "cosmos_43.txt"
+            training_cosmo_file = "cosmos.txt"
 
         self.nbody_training_data_file = nbody_training_data_file
         self.kbin_file = kbin_file
@@ -156,6 +157,7 @@ class LPTEmulator(object):
         self.smooth_spectra = smooth_spectra
         self.window = window
         self.savgol_order = savgol_order
+        self.zpc = zpc
 
         self.kmin = kmin
         self.kmax = kmax
@@ -249,13 +251,24 @@ class LPTEmulator(object):
 
     def _get_pcs(self, evec_spec, spectra, npc):
 
-        nout = np.prod(spectra.shape[:2])
+        if self.zpc:
+            nout = np.prod(spectra.shape[:1])
+        else:
+            nout = np.prod(spectra.shape[:2])
+            
         pcs_spec = np.zeros((nout, self.nspec, self.npc))
-
+        
+        if self.zpc:
+            spectra_reshape = np.swapaxes(spectra, 1, 2).reshape(-1, self.nspec, self.nk*self.nz)
         for si in range(self.nspec):
-            pcs_spec[:, si, :] = np.dot(
-                spectra[:, :, si, :].reshape(-1, self.nk), evec_spec[si, :, :npc]
-            )
+            if self.zpc:
+                pcs_spec[:, si, :] = np.dot(
+                    spectra_reshape[:, si, :], evec_spec[si, :, :npc]
+                )                   
+            else:
+                pcs_spec[:, si, :] = np.dot(
+                    spectra[:, :, si, :].reshape(-1, self.nk), evec_spec[si, :, :npc]
+                )   
 
         return pcs_spec
 
@@ -342,15 +355,28 @@ class LPTEmulator(object):
         nsim = len(simoverlpt)
 
         # Non mean-subtracted PCs
-        Xs = np.zeros((self.nspec, self.nk, self.nk))
+        if not self.zpc:
+            Xs = np.zeros((self.nspec, self.nk, self.nk))
+        else:
+            Xs = np.zeros((self.nspec, self.nk * self.nz, self.nk * self.nz))
+            simoverlpt = simoverlpt = np.swapaxes(simoverlpt, 1, 2).reshape(-1, self.nspec, self.nk * self.nz)
+            
         for i in range(self.nspec):
-            Xs[i, :, :] = np.cov(self.simoverlpt[:, :, i, :].reshape(self.nz * nsim, -1).T)
+            if not self.zpc:
+                Xs[i, :, :] = np.cov(simoverlpt[:, :, i, :].reshape(self.nz * nsim, -1).T)
+            else:
+                Xs[i, :, :] = np.cov(simoverlpt[:, i, ...].T)
+                
 
         # PC basis for each type of spectrum, independent of z and cosmo
-        evec_spec = np.zeros((self.nspec, self.nk, self.nk))
+        if self.zpc:
+            nelem = self.nz * self.nk
+        else:
+            nelem = self.nk
+        evec_spec = np.zeros((self.nspec, nelem, nelem))
 
         # variance per PC
-        vars_spec = np.zeros((self.nspec, self.nk))
+        vars_spec = np.zeros((self.nspec, nelem))
 
         # computing PCs
         for si in range(self.nspec):
@@ -360,12 +386,30 @@ class LPTEmulator(object):
             vars_spec[si, :] = var
 
         self.evec_spec = evec_spec
-        self.evec_spline = interp1d(
-            self.k[self.kmin_idx : self.kmax_idx],
-            self.evec_spec[..., : self.npc],
-            axis=1,
-            fill_value="extrapolate",
-        )
+        
+        if not self.zpc:
+            self.evec_spline = interp1d(
+                self.k[self.kmin_idx : self.kmax_idx],
+                self.evec_spec[..., : self.npc],
+                axis=1,
+                fill_value="extrapolate",
+            )
+        else:
+            self.evec_spline_list = [[] for i in range(self.nspec)]
+            if self.usez:
+                zvar = self.zs
+            else:
+                zvar = 1 / (1 + self.zs)
+                
+            for i in range(self.nspec):
+                for j in range(self.npc):
+                    evec_spline = RectBivariateSpline(
+                        zvar[self.zidx:],
+                        self.k[self.kmin_idx : self.kmax_idx],
+                        self.evec_spec[i, :, j].reshape(self.nz, self.nk),
+                    )
+                    self.evec_spline_list[i].append(evec_spline)
+            
         self.vars_spec = vars_spec
         self.pcs_spec = self._get_pcs(self.evec_spec, simoverlpt, self.npc)
         self.pcs_spec_normed, self.pcs_mean, self.pcs_mult = norm(self.pcs_spec)
@@ -506,10 +550,11 @@ class LPTEmulator(object):
         param_ranges = np.array(
             [[np.min(cosmos[k]), np.max(cosmos[k])] for k in cosmos.dtype.names]
         )
-        if self.usez:
-            param_ranges = np.vstack([param_ranges, [0, self.zmax]])
-        else:
-            param_ranges = np.vstack([param_ranges, [1 / (self.zmax + 1), 1]])
+        if not self.zpc:
+            if self.usez:
+                param_ranges = np.vstack([param_ranges, [0, self.zmax]])
+            else:
+                param_ranges = np.vstack([param_ranges, [1 / (self.zmax + 1), 1]])
 
         # if self.param_mean and self.param_mult are already defined
         # we will use those. This is mostly useful for our test suites
@@ -537,24 +582,27 @@ class LPTEmulator(object):
             else:
                 idx = (np.arange(ncosmos) >= self.degree_cv)
             
-        if self.usez:
-            design = np.hstack(
-                [
-                    np.tile(cosmos.view(("<f8", 7)), self.nz)[
-                        idx
-                    ].reshape(self.nz * (ncosmos - self.degree_cv), 7),
-                    np.tile(z, ncosmos - self.degree_cv)[:, np.newaxis],
-                ]
-            )
+        if not self.zpc:
+            if self.usez:
+                design = np.hstack(
+                    [
+                        np.tile(cosmos.view(("<f8", 7)), self.nz)[
+                            idx
+                        ].reshape(self.nz * (ncosmos - self.degree_cv), 7),
+                        np.tile(z, ncosmos - self.degree_cv)[:, np.newaxis],
+                    ]
+                )
+            else:
+                design = np.hstack(
+                    [
+                        np.tile(cosmos.view(("<f8", 7)), self.nz)[
+                            idx
+                        ].reshape(self.nz * (ncosmos - self.degree_cv), 7),
+                        np.tile(a, ncosmos - self.degree_cv)[:, np.newaxis],
+                    ]
+                )
         else:
-            design = np.hstack(
-                [
-                    np.tile(cosmos.view(("<f8", 7)), self.nz)[
-                        idx
-                    ].reshape(self.nz * (ncosmos - self.degree_cv), 7),
-                    np.tile(a, ncosmos - self.degree_cv)[:, np.newaxis],
-                ]
-            )
+            design = cosmos.view(("<f8", 7))
 
         design_scaled = (design - self.param_mean[np.newaxis, :]) * self.param_mult[
             np.newaxis, :
@@ -573,7 +621,7 @@ class LPTEmulator(object):
                     cp.Uniform(
                         self.param_ranges_scaled[i][0], self.param_ranges_scaled[i][1]
                     )
-                    for i in range(8)
+                    for i in range(len(self.param_ranges_scaled))
                 ]
             )
 
@@ -950,8 +998,8 @@ class LPTEmulator(object):
                     "Trying to compute spectra beyond the maximum value of the emulator!"
                 )
             )
-
         evecs = self.evec_spline(k)
+            
         cosmo_scaled = (cosmo - self.param_mean[np.newaxis, :]) * self.param_mult[
             np.newaxis, :
         ]
@@ -1047,5 +1095,157 @@ class LPTEmulator(object):
             var_emu[...] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[...]
 
         return pk_emu, lambda_surr, var_emu
+    
+    
+    
+    def _predict_zpc(
+        self,
+        k,
+        z,
+        cosmo,
+        spec_lpt,
+        k_lpt=None,
+        lambda_surr=None,
+        evec_spec=None,
+        simoverlpt=None,
+        timing=False,
+    ):
+        """
+        Args:
+            k : array-like
+                1d vector of wave-numbers.
+            cosmo : array-like
+                Vector containing cosmology/scale factor in the order
+                (ombh2, omch2, w0, ns, sigma8, H0, Neff, a).
+                If self.use_sigma_8 != True, then ln(A_s/10^{-10})
+                should be provided instead of sigma8. If self.usez==True 
+                then a should be replaced with redshift.
+        Kwargs:
+            lambda_surr : array-like
+                Array of shape (n_spec, n_pc) of PC coefficients to use
+                to make predictions. Mostly used for validation of PCE/GP procedure.
+            spec_lpt : array-like
+                LPT predictions for spectra from velocileptors at the specified cosmology
+                call. 
+            evec_spec : array-like
+                Array of PC spectra. For use when validating PCA procedure.
+            simoverlpt : array-like
+                Array of n-body/lpt ratios. For use when validating PCA procedure.
+            timing : bool
+                If True, then print timing info.
+
+        Output:
+            pk_emu : array-like
+                Emulator predictions for the 10 basis spectra of the 2nd order lagrangian bias expansion. 
+
+
+        """
+        if np.max(k) > self.k[self.kmax_idx]:
+            raise (
+                ValueError(
+                    "Trying to compute spectra beyond the maximum value of the emulator!"
+                )
+            )
+            
+        evecs = np.zeros_like(self.nspec, self.nk * len(z), self.npc)
+        for i in range(self.nspec):
+            for j in range(self.npc):
+                evecs[i,:,j] = self.evec_spline_list[i][j](k,z)
+            
+        cosmo_scaled = (cosmo - self.param_mean[np.newaxis, :]) * self.param_mult[
+            np.newaxis, :
+        ]
+        if (k_lpt is not None) & (np.sum(k != k_lpt) > 0):
+            lpt_interp = interp1d(k_lpt, spec_lpt, axis=-1, fill_value="extrapolate")
+            spectra_lpt = lpt_interp(k)
+        else:
+            spectra_lpt = spec_lpt
+
+        if spectra_lpt.shape[-1] != len(k) and self.extrap == False:
+            raise (
+                ValueError(
+                    "Trying to feed in lpt spectra computed at different k than the desired outcome!"
+                )
+            )
+
+        # if we already have PCs, just make prediction using them
+
+        if lambda_surr is None:
+
+            # otherwise, check to see if we have PC vecs and spectra, in which case
+            # compute PCs with them
+            if evec_spec is not None:
+                if simoverlpt is None:
+                    raise (
+                        ValueError(
+                            "need to provide non-linear ratios if want PCA only resids"
+                        )
+                    )
+
+                lambda_surr = self._get_pcs(evec_spec, simoverlpt, self.npc)
+                lambda_surr_normed = None
+                lambda_var = np.zeros_like(lambda_surr)
+                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)                
+
+            # otherwise just use the surrogates to compute PCs
+            else:
+                lambda_surr_normed = np.zeros((len(cosmo), self.nspec, self.npc))
+                lambda_var_normed = np.zeros((len(cosmo), self.nspec, self.npc))
+
+                for i in range(self.nspec):
+                    start = time.time()
+                    if self.surrogate_type == "PCE":
+
+                        lambda_surr_normed[:, i, ...] = self.surrogates[i](
+                            *cosmo_scaled.T
+                        ).T
+
+                    elif self.surrogate_type == "GP":
+                        if self.independent_pcs:
+                            for j in range(self.npc):
+                                m, v = self.surrogates[i][j].predict(cosmo_scaled)
+                                lambda_surr_normed[:, i, j] = m[:,0]
+                                lambda_var_normed[:, i, j] = v[:,0]
+                        else:
+                            (
+                                lambda_surr_normed[:, i, ...],
+                                lambda_var_normed[:, i, ...],
+                            ) = self.surrogates[i].predict(cosmo_scaled)
+
+                    end = time.time()
+
+                    if timing:
+                        print("took {}s".format(end - start))
+
+                if self.surrogate_type == 'PCE':
+                    lambda_surr = unnorm(lambda_surr_normed, self.pcs_mean, self.pcs_mult)
+                else:
+                    lambda_surr = lambda_surr_normed
+                lambda_var = unnorm(lambda_var_normed, self.pcs_mean, self.pcs_mult**2)
+                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)
+                
+        simoverlpt_emu = np.einsum("bkp, cbp->cbk", evecs, lambda_surr)
+
+
+        if self.extrap:
+            # Extrap and rebin.
+            spectra_lpt = self._powerlaw_extrapolation(spectra_lpt, k)
+
+        pk_emu = np.zeros_like(spectra_lpt)
+        var_emu = np.zeros_like(spectra_lpt)
+        pk_emu[:] = spectra_lpt
+        # Enforce agreement with LPT
+        if self.forceLPT:
+            pk_emu[..., k > self.kmin] = (10 ** (simoverlpt_emu) * pk_emu)[
+                ..., k > self.kmin
+            ]
+            var_emu[..., k > self.kmin] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[
+                ..., k > self.kmin
+            ]
+        else:
+            pk_emu[...] = 10 ** (simoverlpt_emu) * pk_emu[...]
+            var_emu[...] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[...]
+
+        return pk_emu, lambda_surr, var_emu    
 
     
