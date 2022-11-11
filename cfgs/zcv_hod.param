@@ -1,0 +1,49 @@
+icdir: /global/cfs/projectdirs/cosmosim/slac/jderose/aemulus_nu/Box76_1400/monofonic_za/ics
+ic_format: 'monofonic'
+nbody_format: 'gadget_hdf5'
+outdir: /global/cfs/projectdirs/cosmosim/slac/jderose/aemulus_nu/Box76_1400/anzu_fields_2xsmooth/
+particledir: /global/cfs/projectdirs/cosmosim/slac/jderose/aemulus_nu/Box76_1400/output/snapdir_020/snapshot_020.
+nmesh_in: 1400
+nmesh_out: 1400
+lbox: 1050.0
+z_ic: 12.0
+compensate: True
+sim_type: 'Gadget_hdf5'
+save_advected_fields : False
+np_weightfields: True
+use_neutrinos: True
+compute_cv_surrogate: True
+surrogate_gaussian_cutoff: 2.0943951023931953
+interlaced: True
+linear_surrogate: False
+globsnaps: False
+rsd: True
+skip_lagfields: True
+do_real_space: True
+use_pypower: True
+scale_dependent_growth: False
+p_lin_ic_file: input_powerspec.txt
+tracer_file: /global/cfs/projectdirs/cosmosim/slac/jderose/aemulus_nu/Box76_1400/output/rockstar/outbgc2_10_zheng_2.h5
+field_level_kmax: [0.15]
+field_level_bias: False
+
+Cosmology :
+  h: 0.655748291
+  Omega_b: 0.06263224513568028
+  Omega_cdm: 0.21552826832033892
+  N_ur: 0.00641
+  N_ncdm: 1
+  output: 'mPk mTk'
+  z_pk: '0.0,99'
+  P_k_max_h/Mpc: 20.
+  m_ncdm: 0.01035789
+  deg_ncdm: 3
+  T_cmb: 2.7255
+  A_s: 2.93900038e-09
+  n_s: 0.99339724
+  Omega_Lambda: 0.0
+  w0_fld: -0.90954334
+  wa_fld: 0.0
+  cs2_fld: 1.0
+  fluid_equation_of_state: "CLP"
+  
