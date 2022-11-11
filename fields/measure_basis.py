@@ -98,6 +98,7 @@ def advect_fields(configs, lag_field_dict=None):
 
     lindir = configs["outdir"]
     nmesh = configs["nmesh_in"]
+    nmesh_out = configs["nmesh_out"]
     Lbox = configs["lbox"]
     compensate = bool(configs["compensate"])
     fdir = configs["particledir"]
@@ -105,17 +106,20 @@ def advect_fields(configs, lag_field_dict=None):
     cv_surrogate = configs["compute_cv_surrogate"]
     interlaced = configs.get("interlaced", False)
 
-    H = Lbox / nmesh
+    H = Lbox / nmesh_out
 
     try:
         rsd = configs["rsd"]
     except:
         rsd = False
-
+    filt = configs.get('surrogate_gaussian_cutoff', True)
     # don't use neutrinos for CV surrogate. cb field should be fine.
     if cv_surrogate:
         use_neutrinos = False
-        basename = "mpi_icfields_nmesh_filt"
+        if filt:
+            basename = "mpi_icfields_nmesh_filt"
+        else:
+            basename = "mpi_icfields_nmesh"
         outname = "basis_spectra_za_surrogate"
     else:
         use_neutrinos = configs["use_neutrinos"]
@@ -141,7 +145,7 @@ def advect_fields(configs, lag_field_dict=None):
     #################################### Advecting weights #########################################
 
     pm = pmesh.pm.ParticleMesh(
-        [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler=resampler, comm=comm
+        [nmesh_out, nmesh_out, nmesh_out], Lbox, dtype="float32", resampler=resampler, comm=comm
     )
 
     if rank == 0:
@@ -152,6 +156,13 @@ def advect_fields(configs, lag_field_dict=None):
     pkclass.set(configs["Cosmology"])
     pkclass.compute()
     z_ic = configs["z_ic"]
+    Dic = configs.get('Dic', None)
+
+    kcut = configs.get('surrogate_gaussian_cutoff', None)
+    if kcut is not None:
+        gaussian_cutoff = True
+    else:
+        gaussian_cutoff = False
 
     # Load in a subset of the total gadget snapshot.
     posvec, idvec, npart_this, zbox, m_cb, D = load_particles(
@@ -167,7 +178,13 @@ def advect_fields(configs, lag_field_dict=None):
         lbox=configs["lbox"],
         z_ic=z_ic,
         rsd=rsd,
+        Dic=Dic,
+        gaussian_cutoff=gaussian_cutoff
     )
+
+    if rank == 0:
+        get_memory(rank)
+        sys.stdout.flush()    
 
     # if use_neutrinos=True, compute an additional set of basis spectra,
     # where the unweighted field is the total matter field
@@ -183,6 +200,7 @@ def advect_fields(configs, lag_field_dict=None):
             z_ic=z_ic,
             lbox=configs["lbox"],
             rsd=rsd,
+            Dic=Dic
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
         del posvec_nu
@@ -234,6 +252,10 @@ def advect_fields(configs, lag_field_dict=None):
         ]
     )
 
+    if rank == 0:
+        get_memory(rank)
+        sys.stdout.flush()    
+
     # Gadget has IDs starting with ID=1.
     # FastPM has ID=0
     # idfac decides which one to use
@@ -248,10 +270,12 @@ def advect_fields(configs, lag_field_dict=None):
         )
         a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh % (nmesh // nranks)
     else:
-        a_ic = (((idvec - idfac) // overload) // nmesh**2) % nmesh
+        if not cv_surrogate:
+            a_ic = (((idvec - idfac) // overload) // nmesh ** 2) % nmesh
 
-    b_ic = (((idvec - idfac) // overload) // nmesh) % nmesh
-    c_ic = ((idvec - idfac) // overload) % nmesh
+    if not cv_surrogate:
+        b_ic = (((idvec - idfac) // overload) // nmesh) % nmesh
+        c_ic = ((idvec - idfac) // overload) % nmesh
 
     del idvec
     gc.collect()
@@ -259,6 +283,10 @@ def advect_fields(configs, lag_field_dict=None):
     # Figure out where each particle position is going to be distributed among mpi ranks
     layout = pm.decompose(posvec, smoothing=factor * resampler.support)
     p = layout.exchange(posvec)
+
+    if rank == 0:
+        get_memory(rank)
+        sys.stdout.flush()        
 
     if lag_field_dict:
         kdict = lag_field_dict.keys()
@@ -272,6 +300,11 @@ def advect_fields(configs, lag_field_dict=None):
     gc.collect()
 
     for k in range(len(fieldlist)):
+        if rank==0:
+            print(k)
+            get_memory(rank)
+            sys.stdout.flush()            
+        
         if keynames[k] == "1m":
             m = len(p)
             pass  # already handled this above
@@ -438,6 +471,7 @@ def measure_basis_spectra(
     save=True,
 ):
     nmesh = configs["nmesh_in"]
+    nmesh_out = configs["nmesh_out"]
     Lbox = configs["lbox"]
     componentdir = configs["outdir"]
     cv_surrogate = configs["compute_cv_surrogate"]
@@ -480,7 +514,7 @@ def measure_basis_spectra(
                     field_dict[labelvec[i]],
                     field_dict[labelvec[j]],
                     Lbox,
-                    nmesh,
+                    nmesh_out,
                     rsd,
                     use_pypower,
                     field_D[i],
@@ -495,7 +529,7 @@ def measure_basis_spectra(
             np.save(
                 componentdir
                 + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                    outname, rsd, use_pypower, 1 / (zbox + 1), nmesh
+                    outname, rsd, use_pypower, 1 / (zbox + 1), nmesh_out
                 ),
                 kpkvec,
             )
@@ -519,7 +553,7 @@ def measure_basis_spectra(
                         field_dict[labelvec[i]],
                         field_dict2[labelvec2[j]],
                         Lbox,
-                        nmesh,
+                        nmesh_out,
                         rsd,
                         use_pypower,
                         field_D[i],
@@ -533,7 +567,7 @@ def measure_basis_spectra(
                 np.save(
                     componentdir
                     + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                        outname + "_crosscorr", rsd, use_pypower, 1 / (zbox + 1), nmesh
+                        outname + "_crosscorr", rsd, use_pypower, 1 / (zbox + 1), nmesh_out
                     ),
                     kpkvec,
                 )

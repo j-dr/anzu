@@ -386,10 +386,13 @@ def make_lagfields(configs, save_to_disk=False, z=None):
                 gaussian_kcut = np.pi * nmesh / Lbox
             else:
                 gaussian_kcut = float(configs["surrogate_gaussian_cutoff"])
-
-            print("gaussian_kcut:", gaussian_kcut, flush=True)
+        else:
+            gaussian_kcut = None
+            if rank==0:
+                print('gaussian_kcut:', gaussian_kcut, flush=True)
     else:
         basename = "mpi_icfields_nmesh"
+        gaussian_kcut = None
 
     # set up fft objects
     N = np.array([nmesh, nmesh, nmesh], dtype=int)

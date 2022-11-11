@@ -247,6 +247,8 @@ def load_particles(
     z_ic=None,
     rsd=False,
     z_this=None,
+    Dic=None,
+    gaussian_cutoff=True
 ):
 
     if not cv_surrogate:
@@ -277,7 +279,12 @@ def load_particles(
         assert lbox is not None
 
     D = boltz.scale_independent_growth_factor(z_this)
-    D = D / boltz.scale_independent_growth_factor(z_ic)
+
+    if Dic is None:
+        D = D / boltz.scale_independent_growth_factor(z_ic)
+    else:
+        D = D / Dic
+        
     Ha = boltz.Hubble(z_this) * 299792.458
 
     if rsd:
@@ -345,6 +352,11 @@ def load_particles(
         filt_ics_file = "/".join(icfile.split("/")[:-1]) + "/filtered_ics.h5"
 
         with h5py.File(filt_ics_file, "r") as ics:
+            if gaussian_cutoff:
+                postfix = '_filt'
+            else:
+                postfix = ''
+            
             # read in displacements, rescale by D=D(z_this)/D(z_ini)
             grid = np.meshgrid(
                 np.arange(rank, nmesh, size),
@@ -353,13 +365,13 @@ def load_particles(
                 indexing="ij",
             )
             pos_x = (
-                (grid[0] / nmesh + D * ics["DM_dx_filt"][rank::size, ...]) % 1
+                (grid[0] / nmesh + D * ics["DM_dx{}".format(postfix)][rank::size, ...]) % 1
             ) * lbox
             pos_y = (
-                (grid[1] / nmesh + D * ics["DM_dy_filt"][rank::size, ...]) % 1
+                (grid[1] / nmesh + D * ics["DM_dy{}".format(postfix)][rank::size, ...]) % 1
             ) * lbox
             pos_z = (
-                (grid[2] / nmesh + D * (1 + f) * ics["DM_dz_filt"][rank::size, ...]) % 1
+                (grid[2] / nmesh + D * (1 + f) * ics["DM_dz{}".format(postfix)][rank::size, ...]) % 1
             ) * lbox
 
             pos = np.stack([pos_x, pos_y, pos_z])
@@ -442,7 +454,10 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
         pkdict["shotnoise"] = pk.poles.shotnoise_nonorm
 
     else:
-        pk = FFTPower(mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, poles=poles)
+        dk = 2 * np.pi / lbox
+        pk = FFTPower(
+            mesh1, mode, second=mesh2, BoxSize=lbox, Nmesh=nmesh, poles=poles, dk=dk, kmin=dk
+        )
 
         pkdict["k"] = pk.power["k"].real
         pkdict["nmodes"] = pk.power["modes"].real

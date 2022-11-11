@@ -58,6 +58,8 @@ class LPTEmulator(object):
         tanh=True,
         kecleft=False,
         hyperparams=None,
+        aemulus_alpha_settings=False,
+        param_bound_dict=None
     ):
         """
         Initialize the emulator object. Default values for all kwargs were
@@ -145,19 +147,28 @@ class LPTEmulator(object):
             self.zs = np.array([3.0, 2.0, 1.0, 0.85, 0.7, 0.55, 0.4, 0.25, 0.1, 0.0])
         else:
             self.zs = zs
+        
+        self.usez = usez
+        self.zmax = zmax            
+        self.zidx = np.min(np.where(self.zs <= self.zmax))
+        self.nz = len(self.zs[self.zidx :])            
 
         self.smooth_spectra = smooth_spectra
         self.window = window
         self.savgol_order = savgol_order
-        self.usez = usez
-        self.zmax = zmax
+
         self.kmin = kmin
         self.kmax = kmax
         self.extrap = extrap
         self.kmin_pl = kmin_pl
         self.kmax_pl = kmax_pl
         self.forceLPT = forceLPT
-        self.nspec = 14
+        if aemulus_alpha_settings:
+            self.nspec = 10
+        else:
+            self.nspec = 14
+        self.aemulus_alpha_settings = aemulus_alpha_settings
+        self.param_bound_dict = param_bound_dict
 
         self.param_mean = None
         self.param_mult = None
@@ -261,14 +272,11 @@ class LPTEmulator(object):
         simoverlpt = np.log10(simoverlpt)
         simoverlpt[~np.isfinite(simoverlpt)] = 0
 
-        self.zidx = np.min(np.where(self.zs <= self.zmax))
-        self.nz = len(self.zs[self.zidx :])
-
         self.kmax_idx = np.searchsorted(self.k, self.kmax)
         self.kmin_idx = np.searchsorted(self.k, self.kmin)
         self.nk = self.kmax_idx - self.kmin_idx
 
-        simoverlpt = simoverlpt[:, self.zidx :, :, self.kmin_idx : self.kmax_idx]
+        simoverlpt = simoverlpt[self.training_idx, self.zidx :, :, self.kmin_idx : self.kmax_idx]
 
         return simoverlpt
 
@@ -358,7 +366,7 @@ class LPTEmulator(object):
             axis=1,
             fill_value="extrapolate",
         )
-
+        self.vars_spec = vars_spec
         self.pcs_spec = self._get_pcs(self.evec_spec, simoverlpt, self.npc)
         self.pcs_spec_normed, self.pcs_mean, self.pcs_mult = norm(self.pcs_spec)
 
@@ -400,7 +408,11 @@ class LPTEmulator(object):
                 cosmos_temp["ns"] = cosmos["ns"]
                 cosmos_temp["As"] = cosmos["As"]
                 cosmos_temp["H0"] = cosmos["H0"]
-                cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                if self.aemulus_alpha_settings:
+                    cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
+                    
+                else:
+                    cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
             else:
                 dt = np.dtype(
@@ -423,7 +435,10 @@ class LPTEmulator(object):
                 cosmos_temp["ns"] = cosmos["ns"]
                 cosmos_temp["sigma8"] = cosmos["sigma8"]
                 cosmos_temp["H0"] = cosmos["H0"]
-                cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                if self.aemulus_alpha_settings:
+                    cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
+                else:                    
+                    cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
         else:
             if not self.use_sigma_8:
@@ -445,7 +460,10 @@ class LPTEmulator(object):
                 cosmos_temp["ns"] = cosmos["ns"]
                 cosmos_temp["As"] = cosmos["As"]
                 cosmos_temp["H0"] = cosmos["H0"]
-                cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                if self.aemulus_alpha_settings:
+                    cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
+                else:                    
+                    cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
 
             else:
@@ -467,9 +485,24 @@ class LPTEmulator(object):
                 cosmos_temp["ns"] = cosmos["ns"]
                 cosmos_temp["sigma8"] = cosmos["sigma8"]
                 cosmos_temp["H0"] = cosmos["H0"]
-                cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                if self.aemulus_alpha_settings:
+                    cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
+                else:                    
+                    cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
 
+        if self.param_bound_dict is not None:
+            idx = np.ones(ncosmos, dtype=bool)
+            
+            for k in self.param_bound_dict.keys():
+                idx &= (self.param_bound_dict[k][0]<cosmos[k]) & (cosmos[k] < self.param_bound_dict[k][1])
+
+            cosmos = cosmos[idx]
+            self.training_idx = idx
+            ncosmos = len(cosmos)
+        else:
+            self.training_idx = np.ones(ncosmos, dtype=bool)
+            
         param_ranges = np.array(
             [[np.min(cosmos[k]), np.max(cosmos[k])] for k in cosmos.dtype.names]
         )
@@ -564,10 +597,15 @@ class LPTEmulator(object):
                     for j in range(self.npc):
                         print('fitting pc {}'.format(j), flush=True)
                         K = GPy.kern.Matern32(input_dim=len(self.param_mean)) + GPy.kern.White(1)
-                        m = GPy.models.GPRegression(self.design_scaled,
-                                                    np.real(self.pcs_spec[:, i, j, np.newaxis]),
-                                                    normalizer=None,
-                                                    kernel=K)
+                        #m = GPy.models.GPRegression(self.design_scaled,
+                        #                            np.real(self.pcs_spec[:, i, j, np.newaxis]),
+                        #                            normalizer=None,
+                        #                            kernel=K)
+                        
+                        m = GPy.models.GPHeteroscedasticRegression(self.design_scaled,
+                                                        np.real(self.pcs_spec[:, i, j, np.newaxis]),
+                                                        #normalizer=None,
+                                                        kernel=K)
 
                         if self.optimize_kern:
                             m.optimize(optimizer='bfgs')
@@ -697,8 +735,9 @@ class LPTEmulator(object):
         spectra_aem = spectra_aem[idx]
         spectra_lpt = spectra_lpt[idx]
 
-        self._setup_training_data(spectra_lpt, spectra_aem)
         self.design, self.design_scaled = self._setup_design(self.training_cosmo_file)
+        self._setup_training_data(spectra_lpt, spectra_aem)
+        
         self._train_surrogates()
 
         self.trained = True

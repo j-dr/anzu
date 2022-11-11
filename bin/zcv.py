@@ -366,19 +366,26 @@ def reduce_variance(
     config["lattice_type"] = lattice_type
     lindir = config["outdir"]
 
-    kmax = np.atleast_1d(config["field_level_kmax"])
-    nmesh = int(config["nmesh_out"])
-    Lbox = float(config["lbox"])
-    linear_surrogate = config.get("linear_surrogate", False)
     rsd = config["rsd"]
-    measure_cross_spectra = config.get("measure_cross_spectra", True)
-
     resampler_type = "cic"
     resampler = _get_resampler(resampler_type)
     interlaced = config.get("interlaced", False)
+    kmax = np.atleast_1d(config['field_level_kmax'])
+    nmesh = int(config['nmesh_in'])
+    nmesh_out = int(config['nmesh_out'])
+    Lbox = float(config['lbox'])    
+    linear_surrogate = config.get('linear_surrogate', False)
+    measure_cross_spectra = config.get('measure_cross_spectra', True)
+    filt = config.get('surrogate_gaussian_cutoff', True)
 
-    if config["compute_cv_surrogate"]:
-        basename = "mpi_icfields_nmesh_filt"
+    resampler_type = 'cic'
+    resampler = _get_resampler(resampler_type)
+
+    if config['compute_cv_surrogate']:
+        if filt:
+            basename = "mpi_icfields_nmesh_filt"
+        else:
+            basename = "mpi_icfields_nmesh"
     else:
         basename = "mpi_icfields_nmesh"
 
@@ -428,7 +435,7 @@ def reduce_variance(
             tracer_file = None
 
         tracerfield, pk_tt_dict = tracer_power(
-            tracer_pos, resampler, pm, Lbox, nmesh, rsd=False, interlaced=interlaced
+            tracer_pos, resampler, pm, Lbox, nmesh_out, rsd=False, interlaced=interlaced
         )
 
         field_dict2 = {"t": tracerfield}
@@ -442,7 +449,7 @@ def reduce_variance(
         np.save(
             lindir
             + "{}_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                tbase, config["rsd"], config["use_pypower"], 1 / (zbox + 1), nmesh
+                tbase, config["rsd"], config["use_pypower"], 1 / (zbox + 1), nmesh_out
             ),
             [pk_tt_dict],
         )
@@ -464,7 +471,7 @@ def reduce_variance(
             np.save(
                 lindir
                 + "{}cv_surrogate_auto_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                    stype, config["rsd"], config["use_pypower"], 1 / (zbox + 1), nmesh
+                    stype, config["rsd"], config["use_pypower"], 1 / (zbox + 1), nmesh_out
                 ),
                 pk_auto_vec,
             )
@@ -477,7 +484,7 @@ def reduce_variance(
                     config["rsd"],
                     config["use_pypower"],
                     1 / (zbox + 1),
-                    nmesh,
+                    nmesh_out,
                 ),
                 pk_cross_vec,
             )
@@ -508,7 +515,7 @@ def reduce_variance(
                 bv,
                 field_dict,
                 field_D,
-                nmesh,
+                nmesh_out,
                 kmax,
                 Lbox,
                 rsd,
