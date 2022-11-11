@@ -597,10 +597,15 @@ class LPTEmulator(object):
                     for j in range(self.npc):
                         print('fitting pc {}'.format(j), flush=True)
                         K = GPy.kern.Matern32(input_dim=len(self.param_mean)) + GPy.kern.White(1)
-                        m = GPy.models.GPRegression(self.design_scaled,
-                                                    np.real(self.pcs_spec[:, i, j, np.newaxis]),
-                                                    normalizer=None,
-                                                    kernel=K)
+                        #m = GPy.models.GPRegression(self.design_scaled,
+                        #                            np.real(self.pcs_spec[:, i, j, np.newaxis]),
+                        #                            normalizer=None,
+                        #                            kernel=K)
+                        
+                        m = GPy.models.GPHeteroscedasticRegression(self.design_scaled,
+                                                        np.real(self.pcs_spec[:, i, j, np.newaxis]),
+                                                        #normalizer=None,
+                                                        kernel=K)
 
                         if self.optimize_kern:
                             m.optimize(optimizer='bfgs')
