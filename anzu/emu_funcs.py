@@ -28,6 +28,19 @@ def unnorm(x_normed, x_mean, x_mult):
 
     return x
 
+def get_spectra_from_fields(fields1, fields2, neutrinos=True):
+    spectra = []
+    for i, fi in enumerate(fields1):
+        for j, fj in enumerate(fields2):
+            if (i<j) | (neutrinos & (i==1) & (j==0)): continue
+            spectra.append((fi, fj))
+                    
+    return spectra
+
+def real_space_gaussian_covariance(k, dk, vol, pk_ij, pk_ii, pk_jj):
+    
+    return 2 * np.pi**2 * (pk_ij**2 + pk_ii * pk_jj) / (k**2 * dk * vol)
+
 
 class LPTEmulator(object):
 
@@ -246,7 +259,43 @@ class LPTEmulator(object):
             self.spectra_aem = np.load(aem_file)
             self.spectra_lpt = np.load(lpt_file)
             self.k = np.load(k_file)
+            
+        dk = np.median(self.k[1:] - self.k[:-1])
+        self.get_gaussian_errors(self.k, dk, 1050**3, self.spectra_aem)
 
+
+
+    def get_gaussian_errors(self, k, dk, vol, spectra):
+        
+        if self.nspec==14:
+            fields_n = ['1m', '1cb', 'd', 'd2', 's']
+            component_spectra = get_spectra_from_fields(fields_n, fields_n)
+
+        else:
+            fields_n = ['1cb', 'd', 'd2', 's']
+            component_spectra = get_spectra_from_fields(fields_n, fields_n, neutrinos=False)
+
+        pk_ij_dict = {}
+        for i, c in enumerate(component_spectra):
+            pk_ij_dict[c] = spectra[...,i,:]
+            
+        self.spectra_aem_var = np.zeros_like(self.spectra_aem)
+            
+        for n in range(self.nspec):
+            f_i = component_spectra[n][0]
+            f_j = component_spectra[n][1]
+            try:
+                pk_ii = pk_ij_dict[(f_i, f_i)]
+                pk_jj = pk_ij_dict[(f_j, f_j)]
+                pk_ij = pk_ij_dict[(f_j, f_i)]
+            except:
+                pk_ii = pk_ij_dict[(f_i, f_i)]
+                pk_jj = pk_ij_dict[(f_j, f_j)]
+                pk_ij = pk_ij_dict[(f_i, f_j)]                
+                  
+            self.spectra_aem_var[...,n,:] = real_space_gaussian_covariance(k, dk, vol, pk_ij, pk_ii, pk_jj)
+    
+        
     def _get_pcs(self, evec_spec, spectra, npc):
 
         nout = np.prod(spectra.shape[:2])
@@ -258,6 +307,18 @@ class LPTEmulator(object):
             )
 
         return pcs_spec
+    
+    def _get_pc_vars(self, evec_spec, spectra_var, npc):
+    
+        nout = np.prod(spectra_var.shape[:2])
+        pcs_var_spec = np.zeros((nout, self.nspec, self.npc))
+
+        for si in range(self.nspec):
+            pcs_var_spec[:, si, :] = np.dot(
+                spectra_var[:, :, si, :].reshape(-1, self.nk), evec_spec[si, :, :npc]**2
+            )
+
+        return pcs_var_spec    
 
     def _ratio_and_smooth(self, spectra_aem, spectra_lpt):
 
@@ -325,19 +386,22 @@ class LPTEmulator(object):
 
         return newsimoverlpt
 
-    def _setup_training_data(self, spectra_lpt, spectra_aem):
+    def _setup_training_data(self, spectra_lpt, spectra_aem, spectra_aem_var):
 
         # apply power law extrapolation to LPT spectra where they diverge at high k
         if self.extrap:
 
             spectra_lpt = self._powerlaw_extrapolation(spectra_lpt)
-
+            
         simoverlpt = self._ratio_and_smooth(spectra_aem, spectra_lpt)
 
         # Smooth the ratios even more/calibrate them to LPT to remove kink
         simoverlpt = self._smooth_transition(simoverlpt)
+        simoverlpt_var = spectra_aem_var / spectra_aem**2 / np.log(10)**2
+        simoverlpt_var = simoverlpt_var[self.training_idx, self.zidx :, :, self.kmin_idx : self.kmax_idx]        
 
         self.simoverlpt = simoverlpt
+        self.simoverlpt_var = simoverlpt_var
 
         nsim = len(simoverlpt)
 
@@ -368,7 +432,11 @@ class LPTEmulator(object):
         )
         self.vars_spec = vars_spec
         self.pcs_spec = self._get_pcs(self.evec_spec, simoverlpt, self.npc)
+        self.pc_vars_spec = self._get_pc_vars(self.evec_spec, simoverlpt_var, self.npc)
+        
         self.pcs_spec_normed, self.pcs_mean, self.pcs_mult = norm(self.pcs_spec)
+#        self.pc_vars_spec_normed, _, _ = norm(np.sqrt(self.pc_vars_spec), x_mean=0, x_mult=self.pcs_mult)
+#        self.pc_vars_spec_normed = self.pc_vars_spec_normed**2
 
     def _setup_design(self, cosmofile, param_mean=None, param_mult=None):
 
@@ -596,7 +664,7 @@ class LPTEmulator(object):
                     self.surrogates.append([])
                     for j in range(self.npc):
                         print('fitting pc {}'.format(j), flush=True)
-                        K = GPy.kern.Matern32(input_dim=len(self.param_mean)) + GPy.kern.White(1)
+                        K = GPy.kern.Matern32(input_dim=len(self.param_mean)) #+ GPy.kern.White(1)
                         #m = GPy.models.GPRegression(self.design_scaled,
                         #                            np.real(self.pcs_spec[:, i, j, np.newaxis]),
                         #                            normalizer=None,
@@ -604,8 +672,10 @@ class LPTEmulator(object):
                         
                         m = GPy.models.GPHeteroscedasticRegression(self.design_scaled,
                                                         np.real(self.pcs_spec[:, i, j, np.newaxis]),
-                                                        #normalizer=None,
+                                                        normalizer=None,
                                                         kernel=K)
+                        m['.*het_Gauss.variance'] = self.pc_vars_spec[:, i, j, np.newaxis]
+                        m.het_Gauss.variance.fix()
 
                         if self.optimize_kern:
                             m.optimize(optimizer='bfgs')
@@ -721,6 +791,7 @@ class LPTEmulator(object):
         # Pulling all of the measured P(k) into a file
         spectra_aem = np.copy(self.spectra_aem)
         spectra_lpt = np.copy(self.spectra_lpt)
+        spectra_aem_var = np.copy(self.spectra_aem_var)
         ncosmos = spectra_aem.shape[0]
         
         if self.degree_cv < 2:
@@ -734,9 +805,10 @@ class LPTEmulator(object):
 
         spectra_aem = spectra_aem[idx]
         spectra_lpt = spectra_lpt[idx]
+        spectra_aem_var = spectra_aem_var[idx]
 
         self.design, self.design_scaled = self._setup_design(self.training_cosmo_file)
-        self._setup_training_data(spectra_lpt, spectra_aem)
+        self._setup_training_data(spectra_lpt, spectra_aem, spectra_aem_var)
         
         self._train_surrogates()
 
@@ -1008,14 +1080,14 @@ class LPTEmulator(object):
                     elif self.surrogate_type == "GP":
                         if self.independent_pcs:
                             for j in range(self.npc):
-                                m, v = self.surrogates[i][j].predict(cosmo_scaled)
+                                m, v = self.surrogates[i][j]._raw_predict(cosmo_scaled)
                                 lambda_surr_normed[:, i, j] = m[:,0]
                                 lambda_var_normed[:, i, j] = v[:,0]
                         else:
                             (
                                 lambda_surr_normed[:, i, ...],
                                 lambda_var_normed[:, i, ...],
-                            ) = self.surrogates[i].predict(cosmo_scaled)
+                            ) = self.surrogates[i]._raw_predict(cosmo_scaled)
 
                     end = time.time()
 
