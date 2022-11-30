@@ -113,7 +113,7 @@ def filter_linear_fields(
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
         try:
             dset_dx = ics.create_dataset(
-                "DM_dx_filt", (nmesh, nmesh, nmesh), dtype=p_x.dtype
+                "DM_dx_filt", (nmesh, nmesh, nmesh), dtype=p_x_filt.dtype
             )
         except Exception as e:
             print(e)
@@ -127,7 +127,7 @@ def filter_linear_fields(
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
         try:
             dset_dy = ics.create_dataset(
-                "DM_dy_filt", (nmesh, nmesh, nmesh), dtype=p_y.dtype
+                "DM_dy_filt", (nmesh, nmesh, nmesh), dtype=p_x_filt.dtype
             )
         except Exception as e:
             print(e)
@@ -141,7 +141,7 @@ def filter_linear_fields(
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
         try:
             dset_dz = ics.create_dataset(
-                "DM_dz_filt", (nmesh, nmesh, nmesh), dtype=p_z.dtype
+                "DM_dz_filt", (nmesh, nmesh, nmesh), dtype=p_x_filt.dtype
             )
         except Exception as e:
             print(e)
