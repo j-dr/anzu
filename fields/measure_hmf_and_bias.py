@@ -82,24 +82,47 @@ def load_halos(bgcfile, outfile):
     return m, c, pos
 
 
-def measure_hmf(m, c, nbins=20):
+def measure_hmf_jackknife(pos, m, c, lbox, nbins=20, n_jk_per_dim=8):
 
+    njk = n_jk_per_dim**3
     logmmin = np.log10(np.min(m))
-    logmmax = np.log10(np.max(m))
-    dm = (logmmax - logmmin) / nbins
-
+    logmmax = np.log10(np.max(m))+0.1
     mbins = np.logspace(logmmin, logmmax, nbins)
+    
+    xbin = np.digitize(pos[:,0], np.linspace(0, lbox, n_jk_per_dim+1))
+    ybin = np.digitize(pos[:,1], np.linspace(0, lbox, n_jk_per_dim+1))
+    zbin = np.digitize(pos[:,2], np.linspace(0, lbox, n_jk_per_dim+1))
+    
+    jkreg = n_jk_per_dim ** 2 * xbin + n_jk_per_dim * ybin + zbin
+    del xbin, ybin, zbin
+
     mbin = np.digitize(m, mbins)
-    nm = np.bincount(mbin)
     msum = np.bincount(mbin, weights=m)
-    csum = np.bincount(mbin, weights=c)
-    cssum = np.bincount(mbin, weights=c**2)
+    
+    nm_jk = np.zeros(njk, nbins)
+    cmean_jk = np.zeros(njk, nbins)
+    cstd_jk = np.zeros(njk, nbins)
+    
+    for i in range(n_jk_per_dim**3):
+        idx = jkreg != i
+        nm = np.bincount(mbin[idx])
+        msum = np.bincount(mbin[idx], weights=m[idx])
+        csum = np.bincount(mbin[idx], weights=c[idx])
+        cssum = np.bincount(mbin[idx], weights=c**2)
 
+        cmean_jk[i,:] = csum / nm
+        cstd_jk[i,:] = np.sqrt((cssum - csum**2 / nm) / nm)
+        nm_jk[i,:] = nm
+        
+    nm = np.mean(nm_jk, axis=0)
+    nm_var = (njk - 1) / njk * np.mean((nm_jk-nm)**2, axis=0)
+    cmean = np.mean(cmean_jk, axis=0)
+    cmean_var = (njk - 1) / njk * np.mean((cmean_jk-cmean)**2, axis=0)
+    cstd = np.mean(cstd_jk, axis=0)
+    
     mmean = msum / nm
-    cmean = csum / nm
-    cstd = np.sqrt((cssum - csum**2 / nm) / nm)
 
-    return mbins, mmean, nm, cmean, cstd, mbin
+    return mbins, mmean, nm, nm_var, cmean, cmean_var, cstd, mbin
 
 
 def measure_hmf_and_bias(
@@ -115,7 +138,7 @@ def measure_hmf_and_bias(
     resampler = _get_resampler(resampler_type)
 
     m, c, pos = load_halos(bgcfile, outfile)
-    mbins, mmean, nm, cmean, cstd, mbin = measure_hmf(m, c, nbins=nbins)
+    mbins, mmean, nm, nm_var, cmean, cmean_var, cstd, mbin = measure_hmf_jackknife(pos, m, c, Lbox, nbins=nbins)
 
     M = None
     k_edges = np.linspace(0, nmesh * np.pi / Lbox, int(nmesh // 2))
@@ -215,13 +238,19 @@ def measure_hmf_and_bias(
             halodata.create_dataset("count_data/mbin_edges_{}".format(halofilenum), mbins.shape, dtype=mbins.dtype)
             halodata.create_dataset("count_data/mmean_{}".format(halofilenum), mmean.shape, dtype=mmean.dtype)            
             halodata.create_dataset("count_data/n_per_bin_{}".format(halofilenum), nm.shape, dtype=nm.dtype)
+            halodata.create_dataset("count_data/n_per_bin_var_{}".format(halofilenum), nm_var.shape, dtype=nm_var.dtype)
+           
             halodata.create_dataset(
                 "count_data/cmean_per_bin_{}".format(halofilenum), cmean.shape, dtype=cmean.dtype
             )
+            halodata.create_dataset("count_data/cmean_per_bin_var_{}".format(halofilenum), cmean_var.shape, dtype=cmean_var.dtype)
+            
             halodata.create_dataset("count_data/cstd_per_bin_{}".format(halofilenum), cstd.shape, dtype=cstd.dtype)
             
             halodata["count_data/mbin_edges_{}".format(halofilenum)][:] = mbins
             halodata["count_data/mmean_{}".format(halofilenum)][:] = mmean
             halodata["count_data/n_per_bin_{}".format(halofilenum)][:] = nm
+            halodata["count_data/n_per_bin_var_{}".format(halofilenum)][:] = nm_var
             halodata["count_data/cmean_per_bin_{}".format(halofilenum)][:] = cmean
+            halodata["count_data/cmean_per_bin_var_{}".format(halofilenum)][:] = cmean_var
             halodata["count_data/cstd_per_bin_{}".format(halofilenum)][:] = cstd
