@@ -51,12 +51,12 @@ if __name__ == "__main__":
             halodir = config['halodir']
             bgcdirs = glob("{}/outbgc2_*list".format(halodir))
             outdirs = glob("{}/out_*list".format(halodir))
-            bgcdirs = np.array(glob(bgcdirs))
-            outdirs = np.array(glob(outdirs))
+            bgcdirs = np.array(bgcdirs)
+            outdirs = np.array(outdirs)
 
-            bgcstrs = np.array([d.split("_")[-1].split('.list') for d in bgcdirs])
+            bgcstrs = np.array([d.split("_")[-1].split('.list')[0] for d in bgcdirs])
             bgcnums = np.array([int(d) for d in bgcstrs])
-            outstrs = np.array([d.split("_")[-1].split('.list') for d in outdirs])
+            outstrs = np.array([d.split("_")[-1].split('.list')[0] for d in outdirs])
             outnums = np.array([int(d) for d in outstrs])            
             
             idx = np.argsort(bgcnums)
@@ -144,6 +144,7 @@ if __name__ == "__main__":
                 
             if (do_hmf_and_bias) & (i == savelist[halo_counter]):
                 measure_hmf_and_bias(config, bgcdirs[halo_counter], outdirs[halo_counter], field_dict, field_D, pm, comm=comm)
+                halo_counter += 1
 
     if do_rsd:
 

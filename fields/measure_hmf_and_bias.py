@@ -21,8 +21,8 @@ def field_level_bias(
     comm=None,
     interlaced=True,
 ):
-    tracerfield, pk_tt_dict = tracer_power(
-        pos, resampler, pm, Lbox, nmesh, rsd=False, interlaced=interlaced, comm=comm
+    tracerfield, pk_tt_dict, pm = tracer_power(
+        pos, resampler, Lbox, nmesh, pm=pm, rsd=False, interlaced=interlaced, comm=comm
     )
 
     if "1m" in field_dict:
@@ -42,7 +42,7 @@ def field_level_bias(
         field_D[0] = d
         field_D[1:] = temp
 
-    bv = np.array(bv).T
+    bv = np.array(bv)
 
     return bv, M, pk_tt_dict
 
@@ -124,7 +124,7 @@ def measure_hmf_and_bias(
     bias_cov = np.zeros((nbins, 3, nkmax, 4, 4))
     pk_vec = np.zeros((nbins, 3, nkbins))
 
-    for i in range(len(nbins)):
+    for i in range(nbins):
         idx = mbin == i
 
         bv, M, pk_tt = field_level_bias(
@@ -138,30 +138,29 @@ def measure_hmf_and_bias(
             resampler,
             M=M,
             interlaced=interlaced,
-            resampler=resampler,
             comm=comm,
         )
-        pk_tt = pk_tt[0]["power_wedges"]
-        k = pk_tt[0]["k"]
+        k = pk_tt["k"]        
+        pk_tt = pk_tt["power_wedges"]
 
         if i == 0:
             Minv = [np.linalg.inv(M[..., j]) for j in range(nkmax)]
-        bvcov = np.array([Minv[j] * Lbox**3 / nm[i] for j in range(nkmax)])
+        bvcov = np.array([Minv[j] / nm[i] for j in range(nkmax)])
         bias_vec[i, 0, ...] = bv
         bias_cov[i, 0, ...] = bvcov
-        pk_vec[i, 0, :] = pk_tt
+        pk_vec[i, 0, :] = pk_tt.reshape(nkbins)
 
         idx = (mbin == i) & (c <= cmean[i])
 
         bv, M, pk_tt = field_level_bias(
-            pos[idx], field_dict, field_D, nmesh, kmax, Lbox, pm, False, M=M
+            pos[idx], field_dict, field_D, nmesh, kmax, Lbox, pm, resampler, M=M, interlaced=interlaced, comm=comm
         )
-        pk_tt = pk_tt[0]["power_wedges"]
+        pk_tt = pk_tt["power_wedges"]
 
-        bvcov = np.array([Minv[j] * Lbox**3 / np.sum(idx) for j in range(nkmax)])
+        bvcov = np.array([Minv[j] / np.sum(idx) for j in range(nkmax)])
         bias_vec[i, 1, ...] = bv
         bias_cov[i, 1, ...] = bvcov
-        pk_vec[i, 1, :] = pk_tt
+        pk_vec[i, 1, :] = pk_tt.reshape(nkbins)
 
         idx = (mbin == i) & (c > cmean[i])
 
@@ -173,50 +172,56 @@ def measure_hmf_and_bias(
             kmax,
             Lbox,
             pm,
-            False,
+            resampler,
             M=M,
+            interlaced=interlaced,
+            comm=comm,
         )
-        pk_tt = pk_tt[0]["power_wedges"]
+        pk_tt = pk_tt["power_wedges"]
         
-        bvcov = np.array([Minv[j] * Lbox**3 / np.sum(idx) for j in range(nkmax)])
+        bvcov = np.array([Minv[j] / np.sum(idx) for j in range(nkmax)])
         bias_vec[i, 2, ...] = bv
         bias_cov[i, 2, ...] = bvcov
-        pk_vec[i, 2, :] = pk_tt
+        pk_vec[i, 2, :] = pk_tt.reshape(nkbins)
 
     halofilenum = int(bgcfile.split('.list')[0].split('_')[-1])
     outdir = "/".join(bgcfile.split('/')[:-1])
+
+    if comm.rank == 0:
     
-    with h5.File("{}/hmf_bias_data.h5".format(outdir), "r+") as halodata:
-        kmax = np.array(kmax)
+        with h5.File("{}/hmf_bias_data.h5".format(outdir), "a") as halodata:
+            kmax = np.array(kmax)
 
-        halodata.create_dataset(
-            "bias_data/bias_params_{}".format(halofilenum), (nbins, 3, nkmax, 4), dtype=bias_vec.dtype
-        )
-        halodata.create_dataset(
-            "bias_data/bias_cov_{}".format(halofilenum), (nbins, 3, nkmax, 4, 4), dtype=bias_vec.dtype
-        )
-        halodata.create_dataset(
-            "bias_data/pk_auto_data_{}".format(halofilenum), (nbins, 3, nkbins), dtype=bias_vec.dtype
-        )
-        halodata.create_dataset("bias_data/k_{}".format(halofilenum), (nkbins), dtype=k.dtype)
-        halodata.create_dataset("bias_data/Mij_{}".format(halofilenum), M.shape, dtype=M.dtype)
-        halodata.create_dataset("bias_data/kmax_{}".format(halofilenum), (nkmax), dtype=kmax.dtype)
+            halodata.create_dataset(
+                "bias_data/bias_params_{}".format(halofilenum), (nbins, 3, nkmax, 4), dtype=bias_vec.dtype
+            )
+            halodata.create_dataset(
+                "bias_data/bias_cov_{}".format(halofilenum), (nbins, 3, nkmax, 4, 4), dtype=bias_vec.dtype
+            )
+            halodata.create_dataset(
+                "bias_data/pk_auto_data_{}".format(halofilenum), (nbins, 3, nkbins), dtype=bias_vec.dtype
+            )
+            halodata.create_dataset("bias_data/k_{}".format(halofilenum), (nkbins), dtype=k.dtype)
+            halodata.create_dataset("bias_data/Mij_{}".format(halofilenum), M.shape, dtype=M.dtype)
+            halodata.create_dataset("bias_data/kmax_{}".format(halofilenum), (nkmax), dtype=kmax.dtype)
 
-        halodata["bias_data/bias_params_{}".format(halofilenum)] = bias_vec
-        halodata["bias_data/bias_cov_{}".format(halofilenum)] = bias_cov
-        halodata["bias_data/pk_auto_data_{}".format(halofilenum)] = pk_vec
-        halodata["bias_data/Mij_{}".format(halofilenum)] = M
-        halodata["bias_data/k_{}".format(halofilenum)] = k
-        halodata["bias_data/kmax_{}".format(halofilenum)] = kmax
+            halodata["bias_data/bias_params_{}".format(halofilenum)][:] = bias_vec
+            halodata["bias_data/bias_cov_{}".format(halofilenum)][:] = bias_cov
+            halodata["bias_data/pk_auto_data_{}".format(halofilenum)][:] = pk_vec
+            halodata["bias_data/Mij_{}".format(halofilenum)][:] = M
+            halodata["bias_data/k_{}".format(halofilenum)][:] = k
+            halodata["bias_data/kmax_{}".format(halofilenum)][:] = kmax
 
-        halodata.create_dataset("count_data/mbin_edges_{}".format(halofilenum), mbins.shape, dtype=mbins.dtype)
-        halodata.create_dataset("count_data/n_per_bin_{}".format(halofilenum), nm.shape, dtype=nm.dtype)
-        halodata.create_dataset(
-            "count_data/cmean_per_bin_{}".format(halofilenum), cmean.shape, dtype=cmean.dtype
-        )
-        halodata.create_dataset("count_data/cstd_per_bin_{}".format(halofilenum), cstd.shape, dtype=cstd.dtype)
-
-        halodata["count_data/mbin_edges_{}".format(halofilenum)] = mbins
-        halodata["count_data/n_per_bin_{}".format(halofilenum)] = nm
-        halodata["count_data/cmean_per_bin_{}".format(halofilenum)] = cmean
-        halodata["count_data/cstd_per_bin_{}".format(halofilenum)] = cstd
+            halodata.create_dataset("count_data/mbin_edges_{}".format(halofilenum), mbins.shape, dtype=mbins.dtype)
+            halodata.create_dataset("count_data/mmean_{}".format(halofilenum), mmean.shape, dtype=mmean.dtype)            
+            halodata.create_dataset("count_data/n_per_bin_{}".format(halofilenum), nm.shape, dtype=nm.dtype)
+            halodata.create_dataset(
+                "count_data/cmean_per_bin_{}".format(halofilenum), cmean.shape, dtype=cmean.dtype
+            )
+            halodata.create_dataset("count_data/cstd_per_bin_{}".format(halofilenum), cstd.shape, dtype=cstd.dtype)
+            
+            halodata["count_data/mbin_edges_{}".format(halofilenum)][:] = mbins
+            halodata["count_data/mmean_{}".format(halofilenum)][:] = mmean
+            halodata["count_data/n_per_bin_{}".format(halofilenum)][:] = nm
+            halodata["count_data/cmean_per_bin_{}".format(halofilenum)][:] = cmean
+            halodata["count_data/cstd_per_bin_{}".format(halofilenum)][:] = cstd

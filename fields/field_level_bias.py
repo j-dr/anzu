@@ -39,7 +39,7 @@ def measure_field_level_bias(comm, pm, tracerfield, field_dict, field_D, nmesh, 
     eps = tracerfield.copy()
     if type(cb) is RealField:
         cb = cb.r2c()
-    
+
     dk = 1
     A = np.zeros((len(field_dict), len(kmax)), dtype=cb.dtype)    
     
