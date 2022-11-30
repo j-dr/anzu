@@ -2,6 +2,7 @@ import numpy as np
 import sys, os
 from fields.make_lagfields import make_lagfields
 from fields.measure_basis import advect_fields_and_measure_spectra
+from fields.measure_hmf_and_bias import measure_hmf_and_bias
 from fields.common_functions import get_snap_z
 from mpi4py import MPI
 from copy import copy
@@ -44,6 +45,31 @@ if __name__ == "__main__":
         pdirs = [
             snapdirs[i] + "/snapshot_{}".format(snapstrs[i]) for i in range(nsnaps)
         ]
+        
+        if 'halodir' in config:
+            savelist = np.genfromtxt(config['savelist'])
+            halodir = config['halodir']
+            bgcdirs = glob("{}/outbgc2_*list".format(halodir))
+            outdirs = glob("{}/out_*list".format(halodir))
+            bgcdirs = np.array(glob(bgcdirs))
+            outdirs = np.array(glob(outdirs))
+
+            bgcstrs = np.array([d.split("_")[-1].split('.list') for d in bgcdirs])
+            bgcnums = np.array([int(d) for d in bgcstrs])
+            outstrs = np.array([d.split("_")[-1].split('.list') for d in outdirs])
+            outnums = np.array([int(d) for d in outstrs])            
+            
+            idx = np.argsort(bgcnums)
+            bgcdirs = bgcdirs[idx]
+            bgcstrs = bgcstrs[idx]    
+            idx = np.argsort(outnums)                
+            outdirs = outdirs[idx]
+            outstrs = outstrs[idx]
+            
+            nhalo_files = len(outdirs)
+            halo_counter = 0
+            do_hmf_and_bias = True
+            
 
     elif snaplist:
 
@@ -107,7 +133,7 @@ if __name__ == "__main__":
             else:
                 lag_field_dict = None
 
-            field_dict, field_D, _, _, _ = advect_fields_and_measure_spectra(
+            field_dict, field_D, _, _, _, pm = advect_fields_and_measure_spectra(
                 config, lag_field_dict=lag_field_dict
             )
             if do_surrogates:
@@ -115,6 +141,9 @@ if __name__ == "__main__":
                 _ = advect_fields_and_measure_spectra(
                     config_surr, field_dict2=field_dict, field_D2=field_D
                 )
+                
+            if (do_hmf_and_bias) & (i == savelist[halo_counter]):
+                measure_hmf_and_bias(config, bgcdirs[halo_counter], outdirs[halo_counter], field_dict, field_D, pm, comm=comm)
 
     if do_rsd:
 

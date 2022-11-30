@@ -195,8 +195,13 @@ def get_cv_fields(
 
 
 def tracer_power(
-    tracer_pos, resampler, pm, Lbox, nmesh, rsd=False, use_pypower=True, interlaced=True
+    tracer_pos, resampler, Lbox, nmesh, pm=None, rsd=False, use_pypower=True, interlaced=True
 ):
+    if pm is None:
+        pm = pmesh.pm.ParticleMesh(
+        [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler=resampler, comm=comm
+    )
+
     layout = pm.decompose(tracer_pos)
     p = layout.exchange(tracer_pos)
     tracerfield = pm.paint(p, mass=1, resampler=resampler)
@@ -234,7 +239,7 @@ def tracer_power(
         tracerfield, tracerfield, Lbox, nmesh, rsd, use_pypower, 1, 1
     )
 
-    return tracerfield, pk_tt_dict
+    return tracerfield, pk_tt_dict, pm
 
 
 def field_level_bias(
@@ -434,8 +439,8 @@ def reduce_variance(
             tracer_pos = tracer_pos_list[ii]
             tracer_file = None
 
-        tracerfield, pk_tt_dict = tracer_power(
-            tracer_pos, resampler, pm, Lbox, nmesh_out, rsd=False, interlaced=interlaced
+        tracerfield, pk_tt_dict, pm = tracer_power(
+            tracer_pos, resampler, Lbox, nmesh_out, pm=pm, rsd=False, interlaced=interlaced
         )
 
         field_dict2 = {"t": tracerfield}

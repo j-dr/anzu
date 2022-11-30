@@ -5,6 +5,7 @@ from pmesh.window import FindResampler, ResampleWindow
 from glob import glob
 import psutil
 import h5py
+import pmesh
 import numpy as np
 import gc
 
@@ -470,3 +471,51 @@ def measure_pk(mesh1, mesh2, lbox, nmesh, rsd, use_pypower, D1, D2):
             )
 
     return pkdict
+
+
+def tracer_power(
+    tracer_pos, resampler, Lbox, nmesh, pm=None, rsd=False, use_pypower=True, interlaced=True, comm=None
+):
+    if pm is None:
+        pm = pmesh.pm.ParticleMesh(
+        [nmesh, nmesh, nmesh], Lbox, dtype="float32", resampler=resampler, comm=comm
+    )
+
+    layout = pm.decompose(tracer_pos)
+    p = layout.exchange(tracer_pos)
+    tracerfield = pm.paint(p, mass=1, resampler=resampler)
+
+    if interlaced:
+        H = Lbox / nmesh
+        shifted = pm.affine.shift(0.5)
+        field_interlaced = pm.create(type="real")
+        field_interlaced[:] = 0
+        pm.paint(
+            p, mass=1, resampler=resampler, out=field_interlaced, transform=shifted
+        )
+
+        c1 = tracerfield.r2c()
+        c2 = field_interlaced.r2c()
+
+        for k, s1, s2 in zip(c1.slabs.x, c1.slabs, c2.slabs):
+            kH = sum(k[i] * H for i in range(3))
+            s1[...] = s1[...] * 0.5 + s2[...] * 0.5 * np.exp(0.5 * 1j * kH)
+
+        c1.c2r(tracerfield)
+
+    tracerfield = tracerfield / tracerfield.cmean() - 1
+    tracerfield = tracerfield.r2c()
+
+    if interlaced:
+        tracerfield.apply(CompensateInterlacedCICAliasing, kind="circular")
+    else:
+        tracerfield.apply(CompensateCICAliasing, kind="circular")
+
+    del tracer_pos, p
+
+    # measure tracer auto-power
+    pk_tt_dict = measure_pk(
+        tracerfield, tracerfield, Lbox, nmesh, rsd, use_pypower, 1, 1
+    )
+
+    return tracerfield, pk_tt_dict, pm

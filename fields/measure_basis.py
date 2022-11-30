@@ -596,7 +596,7 @@ def advect_fields_and_measure_spectra(
         field_D2=field_D2,
     )
 
-    return field_dict, field_D, keynames, labelvec, zbox
+    return field_dict, field_D, keynames, labelvec, zbox, pm
 
 
 if __name__ == "__main__":
