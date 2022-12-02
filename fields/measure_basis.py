@@ -327,7 +327,7 @@ def advect_fields(configs, lag_field_dict=None):
 
                 c1 = fieldlist[k].r2c()
                 c2 = field_interlaced.r2c()
-
+        
                 for ki, s1, s2 in zip(c1.slabs.x, c1.slabs, c2.slabs):
                     kH = sum(ki[i] * H for i in range(3))
                     s1[...] = s1[...] * 0.5 + s2[...] * 0.5 * np.exp(0.5 * 1j * kH)
@@ -363,7 +363,7 @@ def advect_fields(configs, lag_field_dict=None):
                 del w
             gc.collect()
 
-            pm.paint(p, out=fieldlist[k], mass=m, resampler=resampler)
+            pm.paint(p, out=fieldlist[k], mass=m * (nmesh_out / nmesh)**3, resampler=resampler)
             if interlaced:
                 field_interlaced = pm.create(type="real")
                 field_interlaced[:] = 0
@@ -371,7 +371,7 @@ def advect_fields(configs, lag_field_dict=None):
                 pm.paint(
                     p,
                     out=field_interlaced,
-                    mass=m,
+                    mass=m * (nmesh_out / nmesh)**3,
                     resampler=resampler,
                     transform=shifted,
                 )

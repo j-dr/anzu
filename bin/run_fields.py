@@ -8,9 +8,19 @@ from mpi4py import MPI
 from copy import copy
 from glob import glob
 from yaml import Loader
+from time import time
 import sys, yaml
+import warnings
 import h5py
 import gc
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
+
+def mpiprint(message, flush=True):
+    if rank==0:
+        print(message, flush=flush)
 
 if __name__ == "__main__":
 
@@ -20,6 +30,10 @@ if __name__ == "__main__":
         config = yaml.load(fp, Loader=Loader)
 
     globsnaps = config["globsnaps"]
+    suppress_warnings = config.pop('suppress_warnings', False)
+    if suppress_warnings:
+        warnings.filterwarnings('ignore')
+        
     snaplist = config.pop("snaplist", None)
     skip_lagfields = config.pop("skip_lagfields", False)  # if they've already been run
 
@@ -69,10 +83,8 @@ if __name__ == "__main__":
             nhalo_files = len(outdirs)
             halo_counter = 0
             do_hmf_and_bias = True
-            
 
     elif snaplist:
-
         this_snap = config["particledir"].split("snapdir_")[-1].split("/")[0]
         pdirs = [config["particledir"].replace(this_snap, s) for s in snaplist]
         nsnaps = len(pdirs)
@@ -81,9 +93,6 @@ if __name__ == "__main__":
         nsnaps = 1
         pdirs = [config["particledir"]]
 
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
 
     do_rsd = config.pop("rsd", False)
     do_rs = config.pop("do_real_space", True)
@@ -99,8 +108,18 @@ if __name__ == "__main__":
     else:
         do_surrogates = False
 
-    if rank == 0:
-        print("Constructing z_ic lagrangian fields", flush=True)
+    if do_rsd:
+        config_rsd = copy(config)
+        config_rsd['rsd'] = True
+        if do_surrogates: 
+            config_surr_rsd = copy(config_surr)
+            config_surr_rsd['rsd'] = True
+
+        if 'nmesh_out_rsd' in config:
+            config_rsd['nmesh_out'] = config['nmesh_out_rsd']
+            config_surr_rsd['nmesh_out'] = config['nmesh_out_rsd']
+            
+    mpiprint("Constructing z_ic lagrangian fields", flush=True)
 
     if not skip_lagfields:
         # just use d_lin from IC code here
@@ -115,61 +134,67 @@ if __name__ == "__main__":
             del out
             gc.collect()
 
-    if rank == 0:
-        print("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
+    mpiprint("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
 
-    if do_rs:
-        for i in range(nsnaps):
-            if i < start_snapnum:
-                continue
-            if rank == 0:
-                print("Processing snapshot {}".format(i), flush=True)
+    for i in range(nsnaps):
+        start = time()
+        if i < start_snapnum:
+            continue
+        mpiprint("Processing snapshot {}".format(i), flush=True)
 
-            config["particledir"] = pdirs[i]
+        config["particledir"] = pdirs[i]
 
-            if scale_dependent_growth:
-                z = get_snap_z(pdirs[i], config["sim_type"])
-                lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
-            else:
-                lag_field_dict = None
-
+        if scale_dependent_growth:
+            z = get_snap_z(pdirs[i], config["sim_type"])
+            lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
+        else:
+            lag_field_dict = None
+        end = time()
+        mpiprint('lagfields took: {}s'.format(end - start))
+        start = time()
+        
+        if do_rs:
+            mpiprint("doing real space".format(i), flush=True)            
             field_dict, field_D, _, _, _, pm = advect_fields_and_measure_spectra(
                 config, lag_field_dict=lag_field_dict
             )
+            end = time()
+            mpiprint('took: {}s'.format(end - start))
+            start = time()
             if do_surrogates:
+                mpiprint("doing real space cvs".format(i), flush=True)                            
                 config_surr["particledir"] = pdirs[i]
                 _ = advect_fields_and_measure_spectra(
                     config_surr, field_dict2=field_dict, field_D2=field_D
                 )
+                end = time()
+                mpiprint('took: {}s'.format(end - start))
+                start = time()
                 
             if (do_hmf_and_bias) & (i == savelist[halo_counter]):
+                mpiprint("doing bias and hmf".format(i), flush=True)                            
                 measure_hmf_and_bias(config, bgcdirs[halo_counter], outdirs[halo_counter], field_dict, field_D, pm, comm=comm)
                 halo_counter += 1
+                end = time()
+                mpiprint('took: {}s'.format(end - start))
+                start = time()
 
-    if do_rsd:
-
-        config["rsd"] = True
-        config_surr["rsd"] = True
-
-        for i in range(nsnaps):
-            if (not do_rsd) | (i < start_snapnum):
-                continue
-            if rank == 0:
-                print("Processing snapshot {}".format(i), flush=True)
-
-            if scale_dependent_growth:
-                z = get_snap_z(pdirs[i], config["sim_type"])
-                lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
-            else:
-                lag_field_dict = None
-
-            config["particledir"] = pdirs[i]
-            field_dict, field_D, _, _, _ = advect_fields_and_measure_spectra(
-                config, lag_field_dict=lag_field_dict
+        if do_rsd:
+            mpiprint('doing rsd')
+            config_rsd["particledir"] = pdirs[i]            
+            field_dict, field_D, _, _, _, pm = advect_fields_and_measure_spectra(
+                config_rsd, lag_field_dict=lag_field_dict
             )
-
+            end = time()
+            mpiprint('took: {}s'.format(end - start))
+            start = time()
+            
             if do_surrogates:
-                config_surr["particledir"] = pdirs[i]
+                mpiprint('doing rsd cvs')                
+                config_surr_rsd["particledir"] = pdirs[i]
                 _ = advect_fields_and_measure_spectra(
-                    config_surr, field_dict2=field_dict, field_D2=field_D
+                    config_surr_rsd, field_dict2=field_dict, field_D2=field_D
                 )
+                end = time()
+                mpiprint('took: {}s'.format(end - start))
+                start = time()

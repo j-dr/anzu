@@ -394,6 +394,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
         basename = "mpi_icfields_nmesh"
         gaussian_kcut = None
 
+    verbose = configs.get('verbose', False)
+
     # set up fft objects
     N = np.array([nmesh, nmesh, nmesh], dtype=int)
     fft = PFFT(MPI.COMM_WORLD, N, axes=(0, 1, 2), dtype="float32", grid=(-1,))
@@ -409,7 +411,8 @@ def make_lagfields(configs, save_to_disk=False, z=None):
     # We never apply scale dependent growth and compute cvs at the same time.
     if scale_dependent_growth:
         assert z is not None
-        if rank == 0:
+        
+        if (rank == 0) & verbose:
             print("Applying scale dependent growth transfer function", flush=True)
         delta_lin = apply_scale_dependent_growth(
             delta_lin, nmesh, Lbox, rank, size, fft, configs, z
@@ -432,7 +435,7 @@ def make_lagfields(configs, save_to_disk=False, z=None):
 
     # Mean-subtract delta^2
     d2 -= dmean
-    if rank == 0:
+    if (rank == 0) & verbose:
         print(dmean, " mean deltasq")
 
     # Parallel-write delta^2 to hdf5 file
@@ -451,7 +454,7 @@ def make_lagfields(configs, save_to_disk=False, z=None):
 
     # Need to compute mean value of tidesq to subtract:
     vmean = MPI_mean(s2, nmesh)
-    if rank == 0:
+    if (rank == 0) & verbose:
         print(vmean, " mean tidesq")
     s2 -= vmean
 
@@ -468,10 +471,11 @@ def make_lagfields(configs, save_to_disk=False, z=None):
 
     if save_to_disk & configs["np_weightfields"]:
 
-        if rank == 0:
+        if (rank == 0):
 
-            print("Wrote successfully! Now must convert to .npy files")
-            print(time.time() - start_time, " seconds!")
+            if verbose:
+                print("Wrote successfully! Now must convert to .npy files")
+                print(time.time() - start_time, " seconds!")
             get_memory()
 
             with h5py.File(outdir + "{}_{}.h5".format(basename, nmesh), "r") as f:

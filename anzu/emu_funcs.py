@@ -559,6 +559,18 @@ class LPTEmulator(object):
                     cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
                 cosmos = cosmos_temp
 
+
+        if self.degree_cv<2:
+            idx = np.arange(ncosmos) != self.ncv
+        else:
+            if self.ncv is not None:
+                idx = (np.arange(ncosmos) < self.ncv) | (np.arange(ncosmos) >= self.degree_cv + ncv)
+            else:
+                idx = (np.arange(ncosmos) >= self.degree_cv)
+
+        cosmos = cosmos[idx]
+        ncosmos = len(cosmos)
+
         if self.param_bound_dict is not None:
             idx = np.ones(ncosmos, dtype=bool)
             
@@ -592,35 +604,19 @@ class LPTEmulator(object):
         z = self.zs[zidx:]
         a = 1 / (1 + z)
         
-        if self.degree_cv < 2:
-            idx = np.arange(ncosmos) != self.ncv
-        else:
-            idx = (np.arange(ncosmos) < self.ncv) & (self.ncv + self.degree_cv < np.arange(ncosmos))
-
-        if self.degree_cv<2:
-            idx = np.arange(ncosmos) != self.ncv
-        else:
-            if self.ncv is not None:
-                idx = (np.arange(ncosmos) < self.ncv) | (np.arange(ncosmos) >= self.degree_cv + ncv)
-            else:
-                idx = (np.arange(ncosmos) >= self.degree_cv)
             
         if self.usez:
             design = np.hstack(
                 [
-                    np.tile(cosmos.view(("<f8", 7)), self.nz)[
-                        idx
-                    ].reshape(self.nz * (ncosmos - self.degree_cv), 7),
-                    np.tile(z, ncosmos - self.degree_cv)[:, np.newaxis],
+                    np.tile(cosmos.view(("<f8", 7)), self.nz).reshape(self.nz * (ncosmos), 7),
+                    np.tile(z, ncosmos)[:, np.newaxis],
                 ]
             )
         else:
             design = np.hstack(
                 [
-                    np.tile(cosmos.view(("<f8", 7)), self.nz)[
-                        idx
-                    ].reshape(self.nz * (ncosmos - self.degree_cv), 7),
-                    np.tile(a, ncosmos - self.degree_cv)[:, np.newaxis],
+                    np.tile(cosmos.view(("<f8", 7)), self.nz).reshape(self.nz * (ncosmos), 7),
+                    np.tile(a, ncosmos)[:, np.newaxis],
                 ]
             )
 

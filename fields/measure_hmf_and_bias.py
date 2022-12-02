@@ -99,25 +99,25 @@ def measure_hmf_jackknife(pos, m, c, lbox, nbins=20, n_jk_per_dim=8):
     mbin = np.digitize(m, mbins)
     msum = np.bincount(mbin, weights=m)
     
-    nm_jk = np.zeros(njk, nbins)
-    cmean_jk = np.zeros(njk, nbins)
-    cstd_jk = np.zeros(njk, nbins)
+    nm_jk = np.zeros((njk, nbins))
+    cmean_jk = np.zeros((njk, nbins))
+    cstd_jk = np.zeros((njk, nbins))
     
     for i in range(n_jk_per_dim**3):
         idx = jkreg != i
-        nm = np.bincount(mbin[idx])
-        msum = np.bincount(mbin[idx], weights=m[idx])
-        csum = np.bincount(mbin[idx], weights=c[idx])
-        cssum = np.bincount(mbin[idx], weights=c**2)
+        nm = np.bincount(mbin[idx], minlength=nbins)
+        msum = np.bincount(mbin[idx], weights=m[idx], minlength=nbins)
+        csum = np.bincount(mbin[idx], weights=c[idx], minlength=nbins)
+        cssum = np.bincount(mbin[idx], weights=c[idx]**2, minlength=nbins)
 
         cmean_jk[i,:] = csum / nm
         cstd_jk[i,:] = np.sqrt((cssum - csum**2 / nm) / nm)
         nm_jk[i,:] = nm
         
     nm = np.mean(nm_jk, axis=0)
-    nm_var = (njk - 1) / njk * np.mean((nm_jk-nm)**2, axis=0)
+    nm_var = (njk - 1) * np.mean((nm_jk-nm)**2, axis=0)
     cmean = np.mean(cmean_jk, axis=0)
-    cmean_var = (njk - 1) / njk * np.mean((cmean_jk-cmean)**2, axis=0)
+    cmean_var = (njk - 1) * np.mean((cmean_jk-cmean)**2, axis=0)
     cstd = np.mean(cstd_jk, axis=0)
     
     mmean = msum / nm
