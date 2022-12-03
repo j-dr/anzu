@@ -179,7 +179,8 @@ def advect_fields(configs, lag_field_dict=None):
         z_ic=z_ic,
         rsd=rsd,
         Dic=Dic,
-        gaussian_cutoff=gaussian_cutoff
+        gaussian_cutoff=gaussian_cutoff,
+        kgaussian_cutoff=kcut
     )
 
     if rank == 0:

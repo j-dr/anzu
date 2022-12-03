@@ -249,7 +249,8 @@ def load_particles(
     rsd=False,
     z_this=None,
     Dic=None,
-    gaussian_cutoff=True
+    gaussian_cutoff=True,
+    kgaussian_cutoff=None
 ):
 
     if not cv_surrogate:
@@ -354,7 +355,7 @@ def load_particles(
 
         with h5py.File(filt_ics_file, "r") as ics:
             if gaussian_cutoff:
-                postfix = '_filt'
+                postfix = '_filt_{}'.format(kgaussian_cutoff)
             else:
                 postfix = ''
             

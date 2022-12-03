@@ -83,6 +83,8 @@ if __name__ == "__main__":
             nhalo_files = len(outdirs)
             halo_counter = 0
             do_hmf_and_bias = True
+        else:
+            do_hmf_and_bias = False            
 
     elif snaplist:
         this_snap = config["particledir"].split("snapdir_")[-1].split("/")[0]
@@ -118,6 +120,16 @@ if __name__ == "__main__":
         if 'nmesh_out_rsd' in config:
             config_rsd['nmesh_out'] = config['nmesh_out_rsd']
             config_surr_rsd['nmesh_out'] = config['nmesh_out_rsd']
+
+        if 'surrogate_gaussian_cutoff_rsd' in config:
+            if config['surrogate_gaussian_cutoff_rsd'] != config['surrogate_gaussian_cutoff']:
+                config_surr_rsd['surrogate_gaussian_cutoff'] = config['surrogate_gaussian_cutoff_rsd']
+                two_filter = True
+            else:
+                two_filter = False
+        else:
+            two_filter = False
+            
             
     mpiprint("Constructing z_ic lagrangian fields", flush=True)
 
@@ -133,6 +145,12 @@ if __name__ == "__main__":
             out = make_lagfields(config_surr, save_to_disk=True)
             del out
             gc.collect()
+
+            if two_filter:
+                out = make_lagfields(config_surr_rsd, save_to_disk=True)
+                del out
+                gc.collect()
+        
 
     mpiprint("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
 
@@ -171,13 +189,14 @@ if __name__ == "__main__":
                 mpiprint('took: {}s'.format(end - start))
                 start = time()
                 
-            if (do_hmf_and_bias) & (i == savelist[halo_counter]):
-                mpiprint("doing bias and hmf".format(i), flush=True)                            
-                measure_hmf_and_bias(config, bgcdirs[halo_counter], outdirs[halo_counter], field_dict, field_D, pm, comm=comm)
-                halo_counter += 1
-                end = time()
-                mpiprint('took: {}s'.format(end - start))
-                start = time()
+            if (do_hmf_and_bias):
+                if (i == savelist[halo_counter]):
+                    mpiprint("doing bias and hmf".format(i), flush=True)                            
+                    measure_hmf_and_bias(config, bgcdirs[halo_counter], outdirs[halo_counter], field_dict, field_D, pm, comm=comm)
+                    halo_counter += 1
+                    end = time()
+                    mpiprint('took: {}s'.format(end - start))
+                    start = time()
 
         if do_rsd:
             mpiprint('doing rsd')

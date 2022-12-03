@@ -98,11 +98,11 @@ def filter_linear_fields(
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
         try:
             dset_delta = ics.create_dataset(
-                "DM_delta_filt", (nmesh, nmesh, nmesh), dtype=d_filt.dtype
+                "DM_delta_filt_{}".format(gaussian_kcut), (nmesh, nmesh, nmesh), dtype=d_filt.dtype
             )
         except Exception as e:
             print(e)
-            dset_delta = ics["DM_delta_filt"]
+            dset_delta = ics["DM_delta_filt_{}".format(gaussian_kcut)]
 
         dset_delta[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = d_filt[:]
         del d_filt
@@ -113,11 +113,11 @@ def filter_linear_fields(
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
         try:
             dset_dx = ics.create_dataset(
-                "DM_dx_filt", (nmesh, nmesh, nmesh), dtype=p_x_filt.dtype
+                "DM_dx_filt_{}".format(gaussian_kcut), (nmesh, nmesh, nmesh), dtype=p_x_filt.dtype
             )
         except Exception as e:
             print(e)
-            dset_dx = ics["DM_dx_filt"]
+            dset_dx = ics["DM_dx_filt_{}".format(gaussian_kcut)]
 
         dset_dx[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = p_x_filt[:]
         del p_x_filt
@@ -127,11 +127,11 @@ def filter_linear_fields(
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
         try:
             dset_dy = ics.create_dataset(
-                "DM_dy_filt", (nmesh, nmesh, nmesh), dtype=p_y_filt.dtype
+                "DM_dy_filt_{}".format(gaussian_kcut), (nmesh, nmesh, nmesh), dtype=p_y_filt.dtype
             )
         except Exception as e:
             print(e)
-            dset_dy = ics["DM_dy_filt"]
+            dset_dy = ics["DM_dy_filt_{}".format(gaussian_kcut)]
 
         dset_dy[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = p_y_filt[:]
         del p_y_filt
@@ -141,18 +141,18 @@ def filter_linear_fields(
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
         try:
             dset_dz = ics.create_dataset(
-                "DM_dz_filt", (nmesh, nmesh, nmesh), dtype=p_z_filt.dtype
+                "DM_dz_filt_{}".format(gaussian_kcut), (nmesh, nmesh, nmesh), dtype=p_z_filt.dtype
             )
         except Exception as e:
             print(e)
-            dset_dz = ics["DM_dz_filt"]
+            dset_dz = ics["DM_dz_filt_{}".format(gaussian_kcut)]
 
         dset_dz[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = p_z_filt[:]
         del p_z_filt
 
     delta_lin = newDistArray(fft, False)
     with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
-        delta_lin[:] = ics["DM_delta_filt"][
+        delta_lin[:] = ics["DM_delta_filt_{}".format(gaussian_kcut)][
             rank * nmesh // size : (rank + 1) * nmesh // size, :, :
         ]
 

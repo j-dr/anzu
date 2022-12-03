@@ -259,6 +259,7 @@ def compute_beta_and_reduce_variance(
     pk_ij_zn_dict = dict(zip(component_spectra_zn, pk_ij_zn))
 
     beta_ij = []
+    rho_ij = []    
     beta_ij_damp = []
     beta_ij_smooth = []
 
@@ -293,16 +294,26 @@ def compute_beta_and_reduce_variance(
             p_ii_zz = pk_ij_zz_dict[(f_i_z, f_i_z)]
             p_jj_zz = pk_ij_zz_dict[(f_j_z, f_j_z)]
             p_ij_zz = pk_ij_zz_dict[(f_j_z, f_i_z)]
+            p_ii_nn = pk_ij_zz_dict[(f_i_n, f_i_n)]
+            p_jj_nn = pk_ij_zz_dict[(f_j_n, f_j_n)]
+            p_ij_nn = pk_ij_zz_dict[(f_j_n, f_i_n)]            
             p_ij_zenbu = pk_ij_zenbu_dict[(f_j_z, f_i_z)]
         except:
             p_ii_zz = pk_ij_zz_dict[(f_i_z, f_i_z)]
             p_jj_zz = pk_ij_zz_dict[(f_j_z, f_j_z)]
             p_ij_zz = pk_ij_zz_dict[(f_i_z, f_j_z)]
+            p_ii_nn = pk_ij_zz_dict[(f_i_n, f_i_n)]
+            p_jj_nn = pk_ij_zz_dict[(f_j_n, f_j_n)]
+            p_ij_nn = pk_ij_zz_dict[(f_i_n, f_j_n)]                        
             p_ij_zenbu = pk_ij_zenbu_dict[(f_i_z, f_j_z)]
 
         beta = (p_ii_zn * p_jj_zn + p_ij_zn * p_ij_nz) / (
             p_ij_zz**2 + p_ii_zz * p_jj_zz
         )
+        rho = (p_ii_zn * p_jj_zn + p_ij_zn * p_ij_nz) / np.sqrt((
+            p_ij_zz**2 + p_ii_zz * p_jj_zz) * (p_ij_nn**2 + p_ii_nn * p_jj_nn))
+        )
+        
         beta_damp = 1 / 2 * (1 - np.tanh((k - k0) / dk)) * beta
         beta_smooth = savgol_filter(beta_damp, sg_window, 3)
         beta1 = 1 / 2 * (1 - np.tanh((k - k0) / dk)) * np.ones_like(beta)
@@ -310,6 +321,8 @@ def compute_beta_and_reduce_variance(
         beta_ij.append(beta)
         beta_ij_damp.append(beta_damp)
         beta_ij_smooth.append(beta_damp)
+
+        rho_ij.append(rho)
 
         p_ij_nn_hat = pk_ij_nn[n] - beta_damp * (p_ij_zz - p_ij_zenbu)
         p_ij_nn_smooth = pk_ij_nn[n] - beta_smooth * (p_ij_zz - p_ij_zenbu)
@@ -335,6 +348,7 @@ def compute_beta_and_reduce_variance(
         pk_ij_zenbu_l,
         pk_ij_zn_l,
         pk_ij_nz_l,
+        rho_ij
     )
 
 
@@ -470,6 +484,7 @@ def reduce_variance(
         pk_ij_zenbu_l,
         pk_ij_zn_l,
         pk_ij_nz_l,
+        rho_ij
     ) = compute_beta_and_reduce_variance(
         k,
         pk_ij_nn,
@@ -499,6 +514,7 @@ def reduce_variance(
         pkclass,
         kecleftobj_m,
         kecleftobj_cb,
+        rho_ij
     )
 
 
@@ -533,6 +549,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
     pk_ij_zn_all = np.zeros((len(a_all), 14, 699))
     pk_ij_nz_all = np.zeros((len(a_all), 14, 699))
     beta_ij_all = np.zeros((len(a_all), 14, 699))
+    rho_ij_all = np.zeros((len(a_all), 14, 699))    
     beta_ij_smooth_all = np.zeros((len(a_all), 14, 699))
     anzu_config = configbase + "anzu_fields.param"
 
@@ -586,6 +603,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
             pkclass,
             kecleftobj_m,
             kecleftobj_cb,
+            rho_ij
         ) = reduce_variance(
             k,
             pk_ij_nn[..., 0],
@@ -612,7 +630,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
             pk_ij_nz_all[j, s, :] = pk_ij_nz_l[s]
             beta_ij_all[j, s, :] = beta_ij[s]
             beta_ij_smooth_all[j, s, :] = beta_ij_smooth[s]
-
+            rho_ij_all[j, s, :] = rho_ij[s]
             if s in [0, 2, 5, 9]:
                 pk_ij_3lpt[j, s, :] = pk_m_3lpt[s_m_map[s]]
             else:
@@ -625,12 +643,13 @@ def reduce_variance_fullsim(configbase, rsd=False):
 
     np.save("{}/pk_ij_nn_hat_noexp_damp.npy".format(basename), pk_ij_hat)
     np.save("{}/pk_ij_nn_smooth_noexp_damp.npy".format(basename), pk_ij_smooth)
-    np.save("{}/pk_ij_nn_beta1_noexp_damp.npy".format(basename), pk_ij_beta1)
+    np.save("{}/pk_ij_nn_beta1_noexp_damp.npy".format(basename), pk_ij_beta1)    
     np.save("{}/pk_ij_zz_noexp_damp.npy".format(basename), pk_ij_zz_all)
     np.save("{}/pk_ij_nn_noexp_damp.npy".format(basename), pk_ij_nn_all)
     np.save("{}/pk_ij_zn_noexp_damp.npy".format(basename), pk_ij_zn_all)
     np.save("{}/pk_ij_nz_noexp_damp.npy".format(basename), pk_ij_nz_all)
     np.save("{}/beta_ij_noexp_damp.npy".format(basename), beta_ij_all)
+    np.save("{}/rho_ij_noexp_damp.npy".format(basename), rho_ij_all)    
     np.save("{}/beta_ij_smooth_noexp_damp.npy".format(basename), beta_ij_smooth_all)
     np.save("{}/pk_ij_zenbu_noexp_damp.npy".format(basename), pk_ij_zenbu)
     np.save("{}/pk_ij_3lpt_noexp_damp.npy".format(basename), pk_ij_3lpt)
