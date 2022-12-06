@@ -440,7 +440,7 @@ def reduce_variance(
             tracer_file = None
 
         tracerfield, pk_tt_dict, pm = tracer_power(
-            tracer_pos, resampler, Lbox, nmesh_out, pm=pm, rsd=False, interlaced=interlaced
+            tracer_pos, resampler, Lbox, nmesh_out, pm=pm, rsd=rsd, interlaced=interlaced
         )
 
         field_dict2 = {"t": tracerfield}
