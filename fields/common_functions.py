@@ -358,7 +358,7 @@ def load_particles(
                 postfix = '_filt_{}'.format(kgaussian_cutoff)
             else:
                 postfix = ''
-            
+
             # read in displacements, rescale by D=D(z_this)/D(z_ini)
             grid = np.meshgrid(
                 np.arange(rank, nmesh, size),

@@ -380,7 +380,7 @@ def make_lagfields(configs, save_to_disk=False, z=None):
     compute_cv_surrogate = configs["compute_cv_surrogate"]
     scale_dependent_growth = configs["scale_dependent_growth"]
     if compute_cv_surrogate:
-        basename = "mpi_icfields_nmesh_filt"
+
         if configs["surrogate_gaussian_cutoff"] is not False:
             if configs["surrogate_gaussian_cutoff"] == True:
                 gaussian_kcut = np.pi * nmesh / Lbox
@@ -390,6 +390,7 @@ def make_lagfields(configs, save_to_disk=False, z=None):
             gaussian_kcut = None
             if rank==0:
                 print('gaussian_kcut:', gaussian_kcut, flush=True)
+        basename = "mpi_icfields_nmesh_filt_{}".format(gaussian_kcut)
     else:
         basename = "mpi_icfields_nmesh"
         gaussian_kcut = None

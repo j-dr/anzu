@@ -117,7 +117,7 @@ def advect_fields(configs, lag_field_dict=None):
     if cv_surrogate:
         use_neutrinos = False
         if filt:
-            basename = "mpi_icfields_nmesh_filt"
+            basename = "mpi_icfields_nmesh_filt_{}".format(filt)
         else:
             basename = "mpi_icfields_nmesh"
         outname = "basis_spectra_za_surrogate"
