@@ -564,7 +564,7 @@ class LPTEmulator(object):
             idx = np.arange(ncosmos) != self.ncv
         else:
             if self.ncv is not None:
-                idx = (np.arange(ncosmos) < self.ncv) | (np.arange(ncosmos) >= self.degree_cv + ncv)
+                idx = (np.arange(ncosmos) < self.ncv) | (np.arange(ncosmos) >= self.degree_cv + self.ncv)
             else:
                 idx = (np.arange(ncosmos) >= self.degree_cv)
 
@@ -668,7 +668,7 @@ class LPTEmulator(object):
                         
                         m = GPy.models.GPHeteroscedasticRegression(self.design_scaled,
                                                         np.real(self.pcs_spec[:, i, j, np.newaxis]),
-                                                        normalizer=None,
+#                                                        normalizer=None,
                                                         kernel=K)
                         m['.*het_Gauss.variance'] = self.pc_vars_spec[:, i, j, np.newaxis]
                         m.het_Gauss.variance.fix()
@@ -679,7 +679,7 @@ class LPTEmulator(object):
                 else:
                     K = GPy.kern.RBF(input_dim=len(self.param_mean),
                                           variance=self.kern_var[i],
-                                          lengthscale=self.kern_lenscale[i])
+                                          lengthscale=self.kern_lenscale[i]) + GPy.kern.White(1)
                     m = GPy.models.GPRegression(self.design_scaled,
                                                 np.real(self.pcs_spec[:, i, :]),
                                                 kernel=K)
