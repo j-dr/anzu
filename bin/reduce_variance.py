@@ -227,7 +227,7 @@ def compute_beta_and_reduce_variance(
     pk_ij_zenbu,
     neutrinos=True,
     k0=0.618,
-    dk=0.167,
+    dk=0.1,
     sg_window=21,
 ):
 
@@ -495,7 +495,7 @@ def reduce_variance(
         pk_ij_zenbu,
         neutrinos=neutrinos,
         k0=0.618,
-        dk=0.167,
+        dk=0.1,
     )  # k0=0.1, dk=0.167)
 
     return (
