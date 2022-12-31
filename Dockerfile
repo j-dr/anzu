@@ -77,5 +77,9 @@ RUN python3 -m pip install matplotlib
 ENV CSBUST=19
 ENV ANOTHAONE=1
 RUN python3 -m pip install numba
-ENV CSBUST=20
+ENV CSBUST=24
+
+RUN python3 -m pip install abacusutils
+RUN python3 -m pip install baccoemu
 RUN git clone https://github.com/j-dr/anzu.git && cd anzu && git checkout aemulus_nu && python3 setup.py clean --all && python3 setup.py install
+RUN python3 -m pip install euclidemu2

@@ -794,7 +794,7 @@ class LPTEmulator(object):
             idx = np.arange(ncosmos) != self.ncv
         else:
             if self.ncv is not None:
-                idx = (np.arange(ncosmos) < self.ncv) | (np.arange(ncosmos) >= self.degree_cv + ncv)
+                idx = (np.arange(ncosmos) < self.ncv) | (np.arange(ncosmos) >= self.degree_cv + self.ncv)
             else:
                 idx = (np.arange(ncosmos) >= self.degree_cv)
         

@@ -129,6 +129,8 @@ if __name__ == "__main__":
                 two_filter = False
         else:
             two_filter = False
+    else:
+        two_filter = False
             
             
     mpiprint("Constructing z_ic lagrangian fields", flush=True)
