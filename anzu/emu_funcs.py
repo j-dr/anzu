@@ -63,7 +63,8 @@ class LPTEmulator(object):
         kmin_pl=0.5,
         kmax_pl=0.6,
         use_physical_densities=True,
-        usez=False,
+        timevar='a',
+        logmnu=False,
         zmax=2.0,
         use_sigma_8=True,
         forceLPT=True,
@@ -116,8 +117,10 @@ class LPTEmulator(object):
                 Maximum k value to fit the power law extrapolation to.
             use_physical_densities : bool
                 Whether or not to use ombh^2 and omch^2 instead of om and oc to train emulator.
-            usez : bool
-                Whether or not to use redshift (as opposed to scale factor) to train the emulator.
+            timevar : str
+                Emulate with respect to either 'z', 'a', or 'loga'
+            logmnu : bool
+                If true, use logmnu as the emulated variable rather than mnu
             zmax : bool
                 Maximum redshift value that will be used in training.
             use_sigma_8 : bool
@@ -161,7 +164,8 @@ class LPTEmulator(object):
         else:
             self.zs = zs
         
-        self.usez = usez
+        self.timevar = timevar
+        self.logmnu = logmnu
         self.zmax = zmax            
         self.zidx = np.min(np.where(self.zs <= self.zmax))
         self.nz = len(self.zs[self.zidx :])            
@@ -481,6 +485,8 @@ class LPTEmulator(object):
                     
                 else:
                     cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                    if self.logmnu:
+                        cosmos_temp["nu_mass_ev"] = np.log(cosmos_temp["nu_mass_ev"])
                 cosmos = cosmos_temp
             else:
                 dt = np.dtype(
@@ -507,6 +513,8 @@ class LPTEmulator(object):
                     cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
                 else:                    
                     cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                    if self.logmnu:
+                        cosmos_temp["nu_mass_ev"] = np.log(cosmos_temp["nu_mass_ev"])
                 cosmos = cosmos_temp
         else:
             if not self.use_sigma_8:
@@ -532,6 +540,9 @@ class LPTEmulator(object):
                     cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
                 else:                    
                     cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                    if self.logmnu:
+                        cosmos_temp["nu_mass_ev"] = np.log(cosmos_temp["nu_mass_ev"])
+                    
                 cosmos = cosmos_temp
 
             else:
@@ -557,6 +568,9 @@ class LPTEmulator(object):
                     cosmos_temp["nu_mass_ev"] = cosmos["Neff"]
                 else:                    
                     cosmos_temp["nu_mass_ev"] = cosmos["nu_mass_ev"]
+                    if self.logmnu:
+                        cosmos_temp["nu_mass_ev"] = np.log(cosmos_temp["nu_mass_ev"])
+                    
                 cosmos = cosmos_temp
 
 
@@ -586,10 +600,12 @@ class LPTEmulator(object):
         param_ranges = np.array(
             [[np.min(cosmos[k]), np.max(cosmos[k])] for k in cosmos.dtype.names]
         )
-        if self.usez:
+        if self.timevar == 'z':
             param_ranges = np.vstack([param_ranges, [0, self.zmax]])
-        else:
+        elif self.timevar == 'a':
             param_ranges = np.vstack([param_ranges, [1 / (self.zmax + 1), 1]])
+        elif self.timevar == 'loga':
+            param_ranges = np.vstack([param_ranges, [np.log(1 / (self.zmax + 1)), np.log(1)]])
 
         # if self.param_mean and self.param_mult are already defined
         # we will use those. This is mostly useful for our test suites
@@ -605,18 +621,25 @@ class LPTEmulator(object):
         a = 1 / (1 + z)
         
             
-        if self.usez:
+        if self.timevar == 'z':
             design = np.hstack(
                 [
                     np.tile(cosmos.view(("<f8", 7)), self.nz).reshape(self.nz * (ncosmos), 7),
                     np.tile(z, ncosmos)[:, np.newaxis],
                 ]
             )
-        else:
+        elif self.timevar == 'a':
             design = np.hstack(
                 [
                     np.tile(cosmos.view(("<f8", 7)), self.nz).reshape(self.nz * (ncosmos), 7),
                     np.tile(a, ncosmos)[:, np.newaxis],
+                ]
+            )
+        elif self.timevar == 'loga':
+            design = np.hstack(
+                [
+                    np.tile(cosmos.view(("<f8", 7)), self.nz).reshape(self.nz * (ncosmos), 7),
+                    np.tile(np.log(a), ncosmos)[:, np.newaxis],
                 ]
             )
 
@@ -647,7 +670,7 @@ class LPTEmulator(object):
                     self.npoly[i], distribution, cross_truncation=self.qtrunc
                 )
                 surrogate = cp.fit_regression(
-                    pce, self.design_scaled.T, np.real(self.pcs_spec_normed[:, i, :])
+                    pce, self.design_scaled.T, np.real(self.pcs_spec_normed[:, i, :]), model=self.reg_model
                 )
 
                 self.surrogates.append(surrogate)
@@ -759,6 +782,11 @@ class LPTEmulator(object):
                     qtrunc = 1
                 else:
                     qtrunc = hyperparams["qtrunc"]
+
+                if 'reg_model' not in hyperparams.keys():
+                    self.reg_model = None
+                else:
+                    self.reg_model = hyperparams['reg_model']                    
 
             self.npoly = npoly
             self.qtrunc = qtrunc
