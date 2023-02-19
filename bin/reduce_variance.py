@@ -212,7 +212,7 @@ def get_spectra_from_fields(fields1, fields2, neutrinos=True):
     spectra = []
     for i, fi in enumerate(fields1):
         for j, fj in enumerate(fields2):
-            if (i < j) | (neutrinos & (i == 1) & (j == 0)):
+            if (i < j): #| (neutrinos & (i == 1) & (j == 0)):
                 continue
             spectra.append((fi, fj))
 
@@ -576,6 +576,12 @@ def reduce_variance_fullsim(configbase, rsd=False):
                 a_this
             )
         )
+        pk_nn_cbm_fname = (
+            basename
+            + "basis_spectra_nbody_pk_rsd=False_pypower=True_a{:.4f}_nmesh1400_justcbm.npy".format(
+                a_this
+            )
+        )        
         pk_zn_fname = (
             basename
             + "basis_spectra_za_surrogate_crosscorr_pk_rsd=False_pypower=True_a{:.4f}_nmesh1400.npy".format(
@@ -584,8 +590,16 @@ def reduce_variance_fullsim(configbase, rsd=False):
         )
         z_this = 1 / a_this - 1
         k, mu, pk_ij_nn, pk_ij_nn_poles = load_pk_from_dict(pk_nn_fname)
+        k, mu, pk_ij_nn_cbm, pk_ij_nn_cbm_poles = load_pk_from_dict(pk_nn_cbm_fname)       
         k, mu, pk_ij_zn, _ = load_pk_from_dict(pk_zn_fname)
         k, mu, pk_ij_zz, _ = load_pk_from_dict(pk_zz_fname)
+        
+        shape = list(pk_ij_nn.shape)[0]
+        pk_ij_nn_wcbm = np.zeros(shape)
+        pk_ij_nn_wcbm[0] = pk_ij_nn[0]
+        pk_ij_nn_wcbm[1] = pk_ij_nn_cbm[0]
+        pk_ij_nn_wcbm[2:] = pk_ij_nn[1:]
+        
         p_in = np.loadtxt("{}/input_powerspec.txt".format(configbase))
         (
             pk_ij_nn_hat,
@@ -608,7 +622,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
             rho_ij
         ) = reduce_variance(
             k,
-            pk_ij_nn[..., 0],
+            pk_ij_nn_wcbm[..., 0],
             pk_ij_zn[..., 0],
             pk_ij_zz[..., 0],
             anzu_config,
