@@ -470,6 +470,7 @@ def measure_basis_spectra(
     field_dict2=None,
     field_D2=None,
     save=True,
+    just_cbm=False
 ):
     nmesh = configs["nmesh_in"]
     nmesh_out = configs["nmesh_out"]
@@ -507,9 +508,12 @@ def measure_basis_spectra(
     pkcounter = 0
     for i in range(len(keynames)):
         for j in range(len(keynames)):
-            if (i < j) | (use_neutrinos & (j == 0) & (i == 1)):
-                continue
-            elif i >= j:
+            if just_cbm:
+                if ((j != 0) & (i != 1)):
+                    continue
+            else:
+                if (i < j) | (use_neutrinos & (j == 0) & (i == 1)):
+                    continue
 
                 pkdict = measure_pk(
                     field_dict[labelvec[i]],
@@ -527,13 +531,23 @@ def measure_basis_spectra(
 
     if save:
         if rank == 0:
-            np.save(
-                componentdir
-                + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
-                    outname, rsd, use_pypower, 1 / (zbox + 1), nmesh_out
-                ),
-                kpkvec,
-            )
+            if just_cbm:
+                np.save(
+                    componentdir
+                    + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}_just_cbm.npy".format(
+                        outname, rsd, use_pypower, 1 / (zbox + 1), nmesh_out
+                    ),
+                    kpkvec,
+                )
+            else:
+                np.save(
+                    componentdir
+                    + "{}_pk_rsd={}_pypower={}_a{:.4f}_nmesh{}.npy".format(
+                        outname, rsd, use_pypower, 1 / (zbox + 1), nmesh_out
+                    ),
+                    kpkvec,
+                )
+                            
         pk_auto_vec = copy(kpkvec)
     else:
         pk_auto_vec = copy(kpkvec)
