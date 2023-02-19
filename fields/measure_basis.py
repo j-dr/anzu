@@ -594,7 +594,7 @@ def measure_basis_spectra(
 
 
 def advect_fields_and_measure_spectra(
-    config, lag_field_dict=None, field_dict2=None, field_D2=None
+        config, lag_field_dict=None, field_dict2=None, field_D2=None, just_cbm=False
 ):
     pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(
         config, lag_field_dict=lag_field_dict
@@ -609,6 +609,7 @@ def advect_fields_and_measure_spectra(
         zbox,
         field_dict2=field_dict2,
         field_D2=field_D2,
+        just_cbm=just_cbm
     )
 
     return field_dict, field_D, keynames, labelvec, zbox, pm

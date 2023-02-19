@@ -72,7 +72,7 @@ def _lpt_pk(
 
     elif zenbu:
         zobj = Zenbu(k, p_lin, cutoff=cutoff, N=3000, jn=15)
-        zobj.make_ptable()
+        zobj.make_ptable(kvec=k)
         cleftpk = zobj.pktable.T
 
     else:
@@ -228,6 +228,7 @@ def compute_beta_and_reduce_variance(
     neutrinos=True,
     k0=0.618,
     dk=0.1,
+#    dk=0.167,
     sg_window=21,
 ):
 
@@ -496,6 +497,7 @@ def reduce_variance(
         neutrinos=neutrinos,
         k0=0.618,
         dk=0.1,
+#        dk=0.167,
     )  # k0=0.1, dk=0.167)
 
     return (
