@@ -157,7 +157,7 @@ if __name__ == "__main__":
         
 
     mpiprint("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
-    just_cbm = True
+    just_cbm = False
     
     for i in range(nsnaps):
         start = time()
@@ -167,7 +167,7 @@ if __name__ == "__main__":
 
         config["particledir"] = pdirs[i]
 
-        if scale_dependent_growth:
+        if scale_dependent_growth & (not just_cbm):
             z = get_snap_z(pdirs[i], config["sim_type"])
             lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
         else:

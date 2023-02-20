@@ -580,7 +580,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
         )
         pk_nn_cbm_fname = (
             basename
-            + "basis_spectra_nbody_pk_rsd=False_pypower=True_a{:.4f}_nmesh1400_justcbm.npy".format(
+            + "basis_spectra_nbody_pk_rsd=False_pypower=True_a{:.4f}_nmesh1400_just_cbm.npy".format(
                 a_this
             )
         )        

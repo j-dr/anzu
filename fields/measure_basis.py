@@ -94,7 +94,7 @@ def send_parts_to_weights(idvec, posvec, nmesh, comm, idfac, overload):
     return posvec, idvec
 
 
-def advect_fields(configs, lag_field_dict=None):
+def advect_fields(configs, lag_field_dict=None, just_cbm=False):
 
     lindir = configs["outdir"]
     nmesh = configs["nmesh_in"]
@@ -242,16 +242,24 @@ def advect_fields(configs, lag_field_dict=None):
         keynames = []
         fieldlist = []
 
-    keynames.extend(["1cb", "delta", "deltasq", "tidesq", "nablasq"])
-    fieldlist.extend(
-        [
-            pm.create(type="real"),
-            pm.create(type="real"),
-            pm.create(type="real"),
-            pm.create(type="real"),
-            pm.create(type="real"),
-        ]
-    )
+    if not just_cbm:
+        keynames.extend(["1cb", "delta", "deltasq", "tidesq", "nablasq"])
+        fieldlist.extend(
+            [
+                pm.create(type="real"),
+                pm.create(type="real"),
+                pm.create(type="real"),
+                pm.create(type="real"),
+                pm.create(type="real"),
+            ]
+        )
+    else:
+        keynames.extend(["1cb"])
+        fieldlist.extend(
+            [
+                pm.create(type="real"),
+            ]
+        )
 
     if rank == 0:
         get_memory(rank)
@@ -265,7 +273,9 @@ def advect_fields(configs, lag_field_dict=None):
         idfac = 0
     overload = 1 << configs["lattice_type"]
 
-    if lag_field_dict:
+    if (lag_field_dict is not None) | (just_cbm & (not cv_surrogate)):
+        if rank==0:
+            print('swap parts', flush=True)
         posvec, idvec = send_parts_to_weights(
             idvec, posvec, nmesh, comm, idfac, overload
         )
@@ -438,15 +448,22 @@ def advect_fields(configs, lag_field_dict=None):
     #################################### Adjusting for growth #############################################################
 
     if use_neutrinos:
-        labelvec = [
-            "1m",
-            "1cb",
-            r"$\delta_L$",
-            r"$\delta^2$",
-            r"$s^2$",
-            r"$\nabla^2\delta$",
-        ]
-        field_D = [1, 1, D, D**2, D**2, D]
+        if not just_cbm:
+            labelvec = [
+                "1m",
+                "1cb",
+                r"$\delta_L$",
+                r"$\delta^2$",
+                r"$s^2$",
+                r"$\nabla^2\delta$",
+            ]
+            field_D = [1, 1, D, D**2, D**2, D]
+        else:
+            labelvec = [
+                "1m",
+                "1cb",
+            ]
+            field_D = [1, 1]
 
     else:
         labelvec = ["1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
@@ -456,6 +473,8 @@ def advect_fields(configs, lag_field_dict=None):
         field_D = [1, 1, 1, 1, 1, 1]
 
     field_dict = dict(zip(labelvec, fieldlist))
+#    print(f'field_dict={field_dict}')
+    print(f'keynames={keynames}')    
 
     return pm, field_dict, field_D, keynames, labelvec, zbox
 
@@ -508,26 +527,21 @@ def measure_basis_spectra(
     pkcounter = 0
     for i in range(len(keynames)):
         for j in range(len(keynames)):
-            if just_cbm:
-                if ((j != 0) & (i != 1)):
-                    continue
-            else:
-                if (i < j) | (use_neutrinos & (j == 0) & (i == 1)):
-                    continue
-
-                pkdict = measure_pk(
-                    field_dict[labelvec[i]],
-                    field_dict[labelvec[j]],
-                    Lbox,
-                    nmesh_out,
-                    rsd,
-                    use_pypower,
-                    field_D[i],
-                    field_D[j],
-                )
-                kpkvec.append(pkdict)
-                pkcounter += 1
-                mpiprint(("pk done ", pkcounter), rank)
+            if (i < j):
+                continue
+            pkdict = measure_pk(
+                field_dict[labelvec[i]],
+                field_dict[labelvec[j]],
+                Lbox,
+                nmesh_out,
+                rsd,
+                use_pypower,
+                field_D[i],
+                field_D[j],
+            )
+            kpkvec.append(pkdict)
+            pkcounter += 1
+            mpiprint(("pk done ", pkcounter), rank)
 
     if save:
         if rank == 0:
@@ -597,7 +611,7 @@ def advect_fields_and_measure_spectra(
         config, lag_field_dict=None, field_dict2=None, field_D2=None, just_cbm=False
 ):
     pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(
-        config, lag_field_dict=lag_field_dict
+        config, lag_field_dict=lag_field_dict, just_cbm=just_cbm
     )
 
     measure_basis_spectra(
