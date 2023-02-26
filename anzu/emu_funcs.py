@@ -3,7 +3,7 @@ import os
 import numpy as np
 import chaospy as cp
 import warnings
-import GPy
+#import GPy
 
 from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
@@ -52,6 +52,7 @@ class LPTEmulator(object):
         lpt_training_data_file=None,
         kbin_file=None,
         zs=None,
+        sigma8z=None,
         training_cosmo_file=None,
         surrogate_type="PCE",
         smooth_spectra=True,
@@ -90,6 +91,8 @@ class LPTEmulator(object):
                 File containing the array of k values that spectra are measured at.
             zs : array like
                 Array containing the redshifts that spectra are measured at.
+            sigma8z: array like
+                Array containing sigma8(z) for all training cosmologies. Only required if timevar=='sigma8z'
             training_cosmo_file : string
                 File name containing the cosmologies that the training spectra are measured at.
             surrogate_type: string
@@ -118,7 +121,7 @@ class LPTEmulator(object):
             use_physical_densities : bool
                 Whether or not to use ombh^2 and omch^2 instead of om and oc to train emulator.
             timevar : str
-                Emulate with respect to either 'z', 'a', or 'loga'
+                Emulate with respect to either 'z', 'a', 'loga' or 'sigma8z'
             logmnu : bool
                 If true, use logmnu as the emulated variable rather than mnu
             zmax : bool
@@ -165,6 +168,8 @@ class LPTEmulator(object):
             self.zs = zs
         
         self.timevar = timevar
+        if self.timevar == 'sigma8z':
+            self.sigma8z = sigma8z
         self.logmnu = logmnu
         self.zmax = zmax            
         self.zidx = np.min(np.where(self.zs <= self.zmax))
@@ -584,6 +589,8 @@ class LPTEmulator(object):
 
         cosmos = cosmos[idx]
         ncosmos = len(cosmos)
+        if self.timevar == 'sigma8z':
+            self.sigma8z = self.sigma8z[idx]
 
         if self.param_bound_dict is not None:
             idx = np.ones(ncosmos, dtype=bool)
@@ -606,6 +613,8 @@ class LPTEmulator(object):
             param_ranges = np.vstack([param_ranges, [1 / (self.zmax + 1), 1]])
         elif self.timevar == 'loga':
             param_ranges = np.vstack([param_ranges, [np.log(1 / (self.zmax + 1)), np.log(1)]])
+        elif self.timevar == 'sigma8z':
+            param_ranges = np.vstack([param_ranges, [np.min(self.sigma8z), np.max(self.sigma8z)]])
 
         # if self.param_mean and self.param_mult are already defined
         # we will use those. This is mostly useful for our test suites
@@ -642,6 +651,13 @@ class LPTEmulator(object):
                     np.tile(np.log(a), ncosmos)[:, np.newaxis],
                 ]
             )
+        elif self.timevar == 'sigma8z':
+            design = np.hstack(
+                [
+                    np.tile(cosmos.view(("<f8", 7)), self.nz).reshape(self.nz * (ncosmos), 7),
+                    self.sigma8z.flatten()[:, np.newaxis]
+                ]
+            )
 
         design_scaled = (design - self.param_mean[np.newaxis, :]) * self.param_mult[
             np.newaxis, :
@@ -666,9 +682,10 @@ class LPTEmulator(object):
 
             # PCE coefficient regression
             for i in range(self.nspec):
-                pce = cp.orth_ttr(
-                    self.npoly[i], distribution, cross_truncation=self.qtrunc
-                )
+                pce = cp.generate_expansion(self.npoly[i], distribution, cross_truncation=self.qtrunc)
+#                pce = cp.orth_ttr(
+#                    self.npoly[i], distribution, cross_truncation=self.qtrunc
+#                )
                 surrogate = cp.fit_regression(
                     pce, self.design_scaled.T, np.real(self.pcs_spec_normed[:, i, :]), model=self.reg_model
                 )

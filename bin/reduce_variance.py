@@ -383,30 +383,20 @@ def lpt_spectra(
 
     kt = np.logspace(-3, 1, 100)
 
-    pk_cb_lin_z0 = np.array(
-        [
-            pkclass.pk_cb_lin(ki, np.array([0])) * cfg["Cosmology"]["h"] ** 3
-            for ki in kt * cfg["Cosmology"]["h"]
-        ]
-    )
-    pk_m_lin_z0 = np.array(
-        [
-            pkclass.pk_lin(ki, np.array([0])) * cfg["Cosmology"]["h"] ** 3
-            for ki in kt * cfg["Cosmology"]["h"]
-        ]
-    )
     pk_m_lin = np.array(
         [
             pkclass.pk_lin(ki, np.array([z])) * cfg["Cosmology"]["h"] ** 3
             for ki in kt * cfg["Cosmology"]["h"]
         ]
     )
-    pk_cb_lin_zb = np.array(
+    pk_cb_lin = np.array(
         [
             pkclass.pk_cb_lin(ki, np.array([z])) * cfg["Cosmology"]["h"] ** 3
             for ki in kt * cfg["Cosmology"]["h"]
         ]
     )
+
+    pk_cb_m_lin = np.sqrt(pk_m_lin * pk_cb_lin)
 
     Dthis = pkclass.scale_independent_growth_factor(z)
     Dic = pkclass.scale_independent_growth_factor(cfg["z_ic"])
@@ -414,26 +404,34 @@ def lpt_spectra(
     zbspline, cleftobj = _lpt_pk(kin, p_lin_in * (Dthis / Dic) ** 2, cutoff=cutoff)
 
     cleft_m_spline, cleftobj = _cleft_pk(kt, pk_m_lin, kecleft=False)
-    cleft_cb_spline, cleftobj = _cleft_pk(kt, pk_cb_lin_zb, kecleft=False)
+    cleft_cb_spline, cleftobj = _cleft_pk(kt, pk_cb_lin, kecleft=False)
+    cleft_cb_m_spline, cleftobj = _cleft_pk(kt, pk_cb_m_lin, kecleft=False)    
+
     kecleft_m_spline, kecleftobj_m = _cleft_pk(
-        kt, pk_m_lin_z0, D=Dthis, kecleft=True, cleftobj=kecleftobj_m
-    )
+        kt, pk_m_lin, D=1, kecleft=True, cleftobj=None)
+
     kecleft_cb_spline, kecleftobj_cb = _cleft_pk(
-        kt, pk_cb_lin_z0, D=Dthis, kecleft=True, cleftobj=kecleftobj_cb
-    )
+        kt, pk_cb_lin, D=1, kecleft=True, cleftobj=None)
+
+    kecleft_cb_m_spline, kecleftobj_cb_m = _cleft_pk(
+        kt, pk_cb_m_lin, D=1, kecleft=True, cleftobj=None)    
 
     pk_zenbu = zbspline(k)
     pk_cb_3lpt = cleft_cb_spline(k)
     pk_m_3lpt = cleft_m_spline(k)
     pk_cb_ke3lpt = kecleft_cb_spline(k)
     pk_m_ke3lpt = kecleft_m_spline(k)
+    pk_cb_m_3lpt = cleft_cb_m_spline(k)
+    pk_cb_m_ke3lpt = kecleft_cb_m_spline(k)    
 
     return (
         pk_zenbu[1:],
         pk_m_3lpt[1:12],
         pk_cb_3lpt[1:12],
+        pk_cb_m_3lpt[1:12],
         pk_m_ke3lpt[1:12],
         pk_cb_ke3lpt[1:12],
+        pk_cb_m_ke3lpt[1:12],
         pkclass,
         kecleftobj_m,
         kecleftobj_cb,
@@ -459,8 +457,10 @@ def reduce_variance(
         pk_ij_zenbu,
         pk_m_3lpt,
         pk_cb_3lpt,
+        pk_cb_m_3lpt,
         pk_m_ke3lpt,
         pk_cb_ke3lpt,
+        pk_cb_m_ke3lpt,
         pkclass,
         kecleftobj_m,
         kecleftobj_cb,
@@ -511,8 +511,10 @@ def reduce_variance(
         pk_ij_nz_l,
         pk_m_3lpt,
         pk_cb_3lpt,
+        pk_cb_m_3lpt,
         pk_m_ke3lpt,
         pk_cb_ke3lpt,
+        pk_cb_m_ke3lpt,
         pkclass,
         kecleftobj_m,
         kecleftobj_cb,
@@ -555,7 +557,8 @@ def reduce_variance_fullsim(configbase, rsd=False):
     beta_ij_smooth_all = np.zeros((len(a_all), 14, 699))
     anzu_config = configbase + "anzu_fields.param"
 
-    s_m_map = {0: 0, 2: 1, 5: 3, 9: 6}
+    s_m_map = {0: 0}
+    s_cb_m_map = {2: 1, 5: 3, 9: 6}    
     s_cb_map = {1: 0, 3: 1, 4: 2, 6: 3, 7: 4, 8: 5, 10: 6, 11: 7, 12: 8, 13: 9}
     pkclass = None
     kecleftobj_m = None
@@ -600,8 +603,10 @@ def reduce_variance_fullsim(configbase, rsd=False):
             pk_ij_nz_l,
             pk_m_3lpt,
             pk_cb_3lpt,
+            pk_cb_m_3lpt,
             pk_m_ke3lpt,
             pk_cb_ke3lpt,
+            pk_cb_m_ke3lpt,
             pkclass,
             kecleftobj_m,
             kecleftobj_cb,
@@ -633,13 +638,17 @@ def reduce_variance_fullsim(configbase, rsd=False):
             beta_ij_all[j, s, :] = beta_ij[s]
             beta_ij_smooth_all[j, s, :] = beta_ij_smooth[s]
             rho_ij_all[j, s, :] = rho_ij[s]
-            if s in [0, 2, 5, 9]:
-                pk_ij_3lpt[j, s, :] = pk_m_3lpt[s_m_map[s]]
+            if s==0:
+                pk_ij_3lpt[j, s, :] = pk_m_3lpt[s_m_map[s]]                
+            elif s in [2, 5, 9]:
+                pk_ij_3lpt[j, s, :] = pk_cb_m_3lpt[s_cb_m_map[s]]
             else:
                 pk_ij_3lpt[j, s, :] = pk_cb_3lpt[s_cb_map[s]]
 
-            if s in [0, 2, 5, 9]:
-                pk_ij_ke3lpt[j, s, :] = pk_m_ke3lpt[s_m_map[s]]
+            if s==0:
+                pk_ij_ke3lpt[j, s, :] = pk_m_ke3lpt[s_m_map[s]]                
+            elif s in [2, 5, 9]:
+                pk_ij_ke3lpt[j, s, :] = pk_cb_m_ke3lpt[s_cb_m_map[s]]
             else:
                 pk_ij_ke3lpt[j, s, :] = pk_cb_ke3lpt[s_cb_map[s]]
 
@@ -654,8 +663,8 @@ def reduce_variance_fullsim(configbase, rsd=False):
     np.save("{}/rho_ij.npy".format(basename), rho_ij_all)    
     np.save("{}/beta_ij_smooth.npy".format(basename), beta_ij_smooth_all)
     np.save("{}/pk_ij_zenbu.npy".format(basename), pk_ij_zenbu)
-    np.save("{}/pk_ij_3lpt.npy".format(basename), pk_ij_3lpt)
-    np.save("{}/pk_ij_ke3lpt.npy".format(basename), pk_ij_ke3lpt)
+    np.save("{}/pk_ij_3lpt_correctnu.npy".format(basename), pk_ij_3lpt)
+    np.save("{}/pk_ij_ke3lpt_scaledep_d_correctnu.npy".format(basename), pk_ij_ke3lpt)
 
 
 if __name__ == "__main__":
