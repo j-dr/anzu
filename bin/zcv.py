@@ -424,7 +424,7 @@ def reduce_variance(
         Lbox,
         nmesh,
         linear_surrogate=linear_surrogate,
-        linear_bias=bias_vec[0],
+        bias_vec=[bias_vec[0]],
     )
 
     for ii in range(n_tracers):
