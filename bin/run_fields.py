@@ -155,7 +155,8 @@ if __name__ == "__main__":
         
 
     mpiprint("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
-
+    just_cbm = True
+    
     for i in range(nsnaps):
         start = time()
         if i < start_snapnum:
@@ -176,7 +177,7 @@ if __name__ == "__main__":
         if do_rs:
             mpiprint("doing real space".format(i), flush=True)            
             field_dict, field_D, _, _, _, pm = advect_fields_and_measure_spectra(
-                config, lag_field_dict=lag_field_dict
+                config, lag_field_dict=lag_field_dict, just_cbm=just_cbm
             )
             end = time()
             mpiprint('took: {}s'.format(end - start))
@@ -204,7 +205,7 @@ if __name__ == "__main__":
             mpiprint('doing rsd')
             config_rsd["particledir"] = pdirs[i]            
             field_dict, field_D, _, _, _, pm = advect_fields_and_measure_spectra(
-                config_rsd, lag_field_dict=lag_field_dict
+                config_rsd, lag_field_dict=lag_field_dict, just_cbm=just_cbm
             )
             end = time()
             mpiprint('took: {}s'.format(end - start))
