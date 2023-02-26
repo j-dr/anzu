@@ -599,7 +599,8 @@ def reduce_variance_fullsim(configbase, rsd=False):
         k, mu, pk_ij_zn, _ = load_pk_from_dict(pk_zn_fname)
         k, mu, pk_ij_zz, _ = load_pk_from_dict(pk_zz_fname)
         
-        shape = list(pk_ij_nn.shape)[0]
+        shape = list(pk_ij_nn.shape)
+        shape[0] += 1
         pk_ij_nn_wcbm = np.zeros(shape)
         pk_ij_nn_wcbm[0] = pk_ij_nn[0]
         pk_ij_nn_wcbm[1] = pk_ij_nn_cbm[0]
