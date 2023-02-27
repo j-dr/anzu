@@ -72,7 +72,7 @@ def _lpt_pk(
 
     elif zenbu:
         zobj = Zenbu(k, p_lin, cutoff=cutoff, N=3000, jn=15)
-        zobj.make_ptable()
+        zobj.make_ptable(kvec=k)
         cleftpk = zobj.pktable.T
 
     else:
@@ -228,6 +228,7 @@ def compute_beta_and_reduce_variance(
     neutrinos=True,
     k0=0.618,
     dk=0.1,
+#    dk=0.167,
     sg_window=21,
 ):
 
@@ -496,6 +497,7 @@ def reduce_variance(
         neutrinos=neutrinos,
         k0=0.618,
         dk=0.1,
+#        dk=0.167,
     )  # k0=0.1, dk=0.167)
 
     return (
@@ -532,8 +534,8 @@ def reduce_variance_fullsim(configbase, rsd=False):
         [
             float(f.split("_a")[-1].split("_")[0])
             for f in glob(
-                "{}/basis_spectra_nbody_pk_rsd={}_pypower={}_a*_nmesh*.npy".format(
-                    basename, rsd, cfg["use_pypower"]
+                "{}/basis_spectra_nbody_pk_rsd={}_pypower={}_a*_nmesh{}.npy".format(
+                    basename, rsd, cfg["use_pypower"], cfg['nmesh_out']
                 )
             )
             if len(f.split("_a")[-1].split("_")[0]) == 6
@@ -581,7 +583,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
         )
         pk_nn_cbm_fname = (
             basename
-            + "basis_spectra_nbody_pk_rsd=False_pypower=True_a{:.4f}_nmesh1400_justcbm.npy".format(
+            + "basis_spectra_nbody_pk_rsd=False_pypower=True_a{:.4f}_nmesh1400_just_cbm.npy".format(
                 a_this
             )
         )        
@@ -597,11 +599,14 @@ def reduce_variance_fullsim(configbase, rsd=False):
         k, mu, pk_ij_zn, _ = load_pk_from_dict(pk_zn_fname)
         k, mu, pk_ij_zz, _ = load_pk_from_dict(pk_zz_fname)
         
-        shape = list(pk_ij_nn.shape)[0]
+        shape = list(pk_ij_nn.shape)
+        shape[0] += 1
         pk_ij_nn_wcbm = np.zeros(shape)
-        pk_ij_nn_wcbm[0] = pk_ij_nn[0]
-        pk_ij_nn_wcbm[1] = pk_ij_nn_cbm[0]
-        pk_ij_nn_wcbm[2:] = pk_ij_nn[1:]
+#        pk_ij_nn_wcbm[0] = pk_ij_nn[0]
+#        pk_ij_nn_wcbm[1] = pk_ij_nn_cbm[1]
+#        pk_ij_nn_wcbm[2:] = pk_ij_nn[1:]
+        pk_ij_nn_wcbm[:3] = np.copy(pk_ij_nn_cbm)
+        pk_ij_nn_wcbm[3:] = np.copy(pk_ij_nn[2:])
         
         p_in = np.loadtxt("{}/input_powerspec.txt".format(configbase))
         (
@@ -646,7 +651,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
 
             pk_ij_zenbu[j, s, :] = pk_ij_zenbu_l[s]
             pk_ij_zz_all[j, s, :] = pk_ij_zz_l[s]
-            pk_ij_nn_all[j, s, :] = pk_ij_nn[s, ..., 0]
+            pk_ij_nn_all[j, s, :] = pk_ij_nn_wcbm[s, ..., 0]
             pk_ij_zn_all[j, s, :] = pk_ij_zn_l[s]
             pk_ij_nz_all[j, s, :] = pk_ij_nz_l[s]
             beta_ij_all[j, s, :] = beta_ij[s]

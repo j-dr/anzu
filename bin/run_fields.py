@@ -119,11 +119,13 @@ if __name__ == "__main__":
 
         if 'nmesh_out_rsd' in config:
             config_rsd['nmesh_out'] = config['nmesh_out_rsd']
-            config_surr_rsd['nmesh_out'] = config['nmesh_out_rsd']
+            if do_surrogates:
+                config_surr_rsd['nmesh_out'] = config['nmesh_out_rsd']
 
         if 'surrogate_gaussian_cutoff_rsd' in config:
             if config['surrogate_gaussian_cutoff_rsd'] != config['surrogate_gaussian_cutoff']:
-                config_surr_rsd['surrogate_gaussian_cutoff'] = config['surrogate_gaussian_cutoff_rsd']
+                if do_surrogates:
+                    config_surr_rsd['surrogate_gaussian_cutoff'] = config['surrogate_gaussian_cutoff_rsd']
                 two_filter = True
             else:
                 two_filter = False
@@ -165,7 +167,7 @@ if __name__ == "__main__":
 
         config["particledir"] = pdirs[i]
 
-        if scale_dependent_growth:
+        if scale_dependent_growth & (not just_cbm):
             z = get_snap_z(pdirs[i], config["sim_type"])
             lag_field_dict = make_lagfields(config, save_to_disk=False, z=z)
         else:
