@@ -32,8 +32,8 @@ def get_spectra_from_fields(fields1, fields2, neutrinos=True):
     spectra = []
     for i, fi in enumerate(fields1):
         for j, fj in enumerate(fields2):
-            if (i<j) | (neutrinos & (i==1) & (j==0)): continue
-            spectra.append((fi, fj))
+            if (i<j):
+                spectra.append((fi, fj))
                     
     return spectra
 
@@ -188,7 +188,7 @@ class LPTEmulator(object):
         if aemulus_alpha_settings:
             self.nspec = 10
         else:
-            self.nspec = 14
+            self.nspec = 15
         self.aemulus_alpha_settings = aemulus_alpha_settings
         self.param_bound_dict = param_bound_dict
 
@@ -276,7 +276,7 @@ class LPTEmulator(object):
 
     def get_gaussian_errors(self, k, dk, vol, spectra):
         
-        if self.nspec==14:
+        if self.nspec==15:
             fields_n = ['1m', '1cb', 'd', 'd2', 's']
             component_spectra = get_spectra_from_fields(fields_n, fields_n)
 
