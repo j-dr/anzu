@@ -534,8 +534,8 @@ def reduce_variance_fullsim(configbase, rsd=False):
         [
             float(f.split("_a")[-1].split("_")[0])
             for f in glob(
-                "{}/basis_spectra_nbody_pk_rsd={}_pypower={}_a*_nmesh*.npy".format(
-                    basename, rsd, cfg["use_pypower"]
+                "{}/basis_spectra_nbody_pk_rsd={}_pypower={}_a*_nmesh{}.npy".format(
+                    basename, rsd, cfg["use_pypower"], cfg['nmesh_out']
                 )
             )
             if len(f.split("_a")[-1].split("_")[0]) == 6
@@ -602,9 +602,11 @@ def reduce_variance_fullsim(configbase, rsd=False):
         shape = list(pk_ij_nn.shape)
         shape[0] += 1
         pk_ij_nn_wcbm = np.zeros(shape)
-        pk_ij_nn_wcbm[0] = pk_ij_nn[0]
-        pk_ij_nn_wcbm[1] = pk_ij_nn_cbm[0]
-        pk_ij_nn_wcbm[2:] = pk_ij_nn[1:]
+#        pk_ij_nn_wcbm[0] = pk_ij_nn[0]
+#        pk_ij_nn_wcbm[1] = pk_ij_nn_cbm[1]
+#        pk_ij_nn_wcbm[2:] = pk_ij_nn[1:]
+        pk_ij_nn_wcbm[:3] = np.copy(pk_ij_nn_cbm)
+        pk_ij_nn_wcbm[3:] = np.copy(pk_ij_nn[2:])
         
         p_in = np.loadtxt("{}/input_powerspec.txt".format(configbase))
         (
@@ -649,7 +651,7 @@ def reduce_variance_fullsim(configbase, rsd=False):
 
             pk_ij_zenbu[j, s, :] = pk_ij_zenbu_l[s]
             pk_ij_zz_all[j, s, :] = pk_ij_zz_l[s]
-            pk_ij_nn_all[j, s, :] = pk_ij_nn[s, ..., 0]
+            pk_ij_nn_all[j, s, :] = pk_ij_nn_wcbm[s, ..., 0]
             pk_ij_zn_all[j, s, :] = pk_ij_zn_l[s]
             pk_ij_nz_all[j, s, :] = pk_ij_nz_l[s]
             beta_ij_all[j, s, :] = beta_ij[s]

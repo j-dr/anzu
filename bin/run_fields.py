@@ -157,7 +157,7 @@ if __name__ == "__main__":
         
 
     mpiprint("Processing basis spectra for {} snapshots".format(nsnaps), flush=True)
-    just_cbm = False
+    just_cbm = True
     
     for i in range(nsnaps):
         start = time()

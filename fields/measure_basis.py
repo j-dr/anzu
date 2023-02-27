@@ -474,7 +474,7 @@ def advect_fields(configs, lag_field_dict=None, just_cbm=False):
 
     field_dict = dict(zip(labelvec, fieldlist))
 #    print(f'field_dict={field_dict}')
-    print(f'keynames={keynames}')    
+#    print(f'keynames={keynames}')    
 
     return pm, field_dict, field_D, keynames, labelvec, zbox
 
