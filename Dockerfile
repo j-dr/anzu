@@ -81,6 +81,7 @@ ENV CSBUST=24
 
 RUN python3 -m pip install abacusutils
 RUN python3 -m pip install baccoemu
+ENV CSBUST=1
 RUN git clone https://github.com/j-dr/anzu.git && cd anzu && git checkout aemulus_nu && python3 setup.py clean --all && python3 setup.py install
 RUN python3 -m pip install euclidemu2
 RUN python3 -m pip install getdist
