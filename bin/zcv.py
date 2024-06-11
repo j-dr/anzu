@@ -1,4 +1,5 @@
 import sys, os
+#sys.path.insert(0, '/global/homes/j/jderose/cosmosim/anzu/')
 from mpi4py_fft import PFFT
 from anzu.utils import combine_real_space_spectra, combine_measured_rsd_spectra
 from scipy.interpolate import interp1d
@@ -78,7 +79,11 @@ def get_linear_field(
     boltz.set(config["Cosmology"])
     boltz.compute()
     z_ic = config["z_ic"]
-    z_this = get_snap_z(config["particledir"], config["sim_type"])
+    if 'z_this' not in config:
+        z_this = get_snap_z(config["particledir"], config["sim_type"])
+    else:
+        z_this = config['z_this']
+        
     D = boltz.scale_independent_growth_factor(z_this)
     D = D / boltz.scale_independent_growth_factor(z_ic)
     f = boltz.scale_independent_growth_factor_f(z_this)
@@ -159,17 +164,29 @@ def get_cv_fields(
 
     resampler_type = "cic"
     resampler = _get_resampler(resampler_type)
-
-    linfields = glob(lindir + "{}_{}_*_np.npy".format(basename, nmesh))
+    filt = config.get('surrogate_gaussian_cutoff', True)
+    if filt:
+        linfields = glob(lindir + "{}_{}_{}*_np.npy".format(basename, filt, nmesh))
+    else: 
+        linfields = glob(lindir + "{}_{}*_np.npy".format(basename, nmesh))
+        
+    print(linfields)
     if len(linfields) == 0:
         make_lagfields(config, save_to_disk=True)
         lag_field_dict = None
     elif linear_surrogate:
         lag_field_dict = {}
-        arr = np.load(
-            lindir + "{}_{}_{}_np.npy".format(basename, nmesh, "delta"),
-            mmap_mode="r",
-        )
+        if filt:
+            arr = np.load(
+                lindir + "{}_{}_{}_{}_np.npy".format(basename, filt, nmesh, "delta"),
+                mmap_mode="r",
+            )
+        else:
+            arr = np.load(
+                lindir + "{}_{}_{}_np.npy".format(basename, nmesh, "delta"),
+                mmap_mode="r",
+            )
+            
         lag_field_dict["delta"] = arr[
             rank * nmesh // size : (rank + 1) * nmesh // size, :, :
         ]
@@ -228,9 +245,9 @@ def tracer_power(
     tracerfield = tracerfield.r2c()
 
     if interlaced:
-        tracerfield.apply(CompensateInterlacedCICAliasing, kind="circular")
+        tracerfield = tracerfield.apply(CompensateInterlacedCICAliasing, kind="circular")
     else:
-        tracerfield.apply(CompensateCICAliasing, kind="circular")
+        tracerfield = tracerfield.apply(CompensateCICAliasing, kind="circular")
 
     del tracer_pos, p
 
@@ -495,7 +512,7 @@ def reduce_variance(
             )
 
         if (bias_vec[ii] is None) & (field_level_bias):
-            bv, field_level_bias(
+            bv, zaf = field_level_bias(
                 tracerfield,
                 field_dict,
                 field_D,

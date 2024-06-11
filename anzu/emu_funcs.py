@@ -270,7 +270,7 @@ class LPTEmulator(object):
             self.k = np.load(k_file)
             
         dk = np.median(self.k[1:] - self.k[:-1])
-        self.get_gaussian_errors(self.k, dk, 1050**3, self.spectra_aem)
+#        self.get_gaussian_errors(self.k, dk, 1050**3, self.spectra_aem)
 
 
 
@@ -395,7 +395,8 @@ class LPTEmulator(object):
 
         return newsimoverlpt
 
-    def _setup_training_data(self, spectra_lpt, spectra_aem, spectra_aem_var):
+#    def _setup_training_data(self, spectra_lpt, spectra_aem, spectra_aem_var):
+    def _setup_training_data(self, spectra_lpt, spectra_aem):
 
         # apply power law extrapolation to LPT spectra where they diverge at high k
         if self.extrap:
@@ -406,11 +407,11 @@ class LPTEmulator(object):
 
         # Smooth the ratios even more/calibrate them to LPT to remove kink
         simoverlpt = self._smooth_transition(simoverlpt)
-        simoverlpt_var = spectra_aem_var / spectra_aem**2 / np.log(10)**2
-        simoverlpt_var = simoverlpt_var[self.training_idx, self.zidx :, :, self.kmin_idx : self.kmax_idx]        
+#        simoverlpt_var = spectra_aem_var / spectra_aem**2 / np.log(10)**2
+#        simoverlpt_var = simoverlpt_var[self.training_idx, self.zidx :, :, self.kmin_idx : self.kmax_idx]        
 
         self.simoverlpt = simoverlpt
-        self.simoverlpt_var = simoverlpt_var
+#        self.simoverlpt_var = simoverlpt_var
 
         nsim = len(simoverlpt)
 
@@ -441,7 +442,7 @@ class LPTEmulator(object):
         )
         self.vars_spec = vars_spec
         self.pcs_spec = self._get_pcs(self.evec_spec, simoverlpt, self.npc)
-        self.pc_vars_spec = self._get_pc_vars(self.evec_spec, simoverlpt_var, self.npc)
+#        self.pc_vars_spec = self._get_pc_vars(self.evec_spec, simoverlpt_var, self.npc)
         
         self.pcs_spec_normed, self.pcs_mean, self.pcs_mult = norm(self.pcs_spec)
 #        self.pc_vars_spec_normed, _, _ = norm(np.sqrt(self.pc_vars_spec), x_mean=0, x_mult=self.pcs_mult)
@@ -832,7 +833,7 @@ class LPTEmulator(object):
         # Pulling all of the measured P(k) into a file
         spectra_aem = np.copy(self.spectra_aem)
         spectra_lpt = np.copy(self.spectra_lpt)
-        spectra_aem_var = np.copy(self.spectra_aem_var)
+#        spectra_aem_var = np.copy(self.spectra_aem_var)
         ncosmos = spectra_aem.shape[0]
         
         if self.degree_cv < 2:
@@ -846,10 +847,10 @@ class LPTEmulator(object):
 
         spectra_aem = spectra_aem[idx]
         spectra_lpt = spectra_lpt[idx]
-        spectra_aem_var = spectra_aem_var[idx]
+#        spectra_aem_var = spectra_aem_var[idx]
 
         self.design, self.design_scaled = self._setup_design(self.training_cosmo_file)
-        self._setup_training_data(spectra_lpt, spectra_aem, spectra_aem_var)
+        self._setup_training_data(spectra_lpt, spectra_aem)
         
         self._train_surrogates()
 
@@ -931,6 +932,7 @@ class LPTEmulator(object):
             # Cross-component-spectra are multiplied by 2, b_2 is 2x larger than in velocileptors
             bterms_hh = [
                 0,
+                0,
                 1,
                 0,
                 2 * b1,
@@ -947,7 +949,7 @@ class LPTEmulator(object):
             ]
 
             # hm correlations only have one kind of <1,delta_i> correlation
-            bterms_hm = [1, 0, b1, 0, 0, b2 / 2, 0, 0, 0, bs, 0, 0, 0, 0]
+            bterms_hm = [0, 1, 0, b1, 0, 0, b2 / 2, 0, 0, 0, bs, 0, 0, 0, 0]
 
             pkvec = emu_spec
 
@@ -955,6 +957,7 @@ class LPTEmulator(object):
             b1, b2, bs, bk2, sn = btheta
             # Cross-component-spectra are multiplied by 2, b_2 is 2x larger than in velocileptors
             bterms_hh = [
+                0,
                 0,
                 1,
                 0,
@@ -978,6 +981,7 @@ class LPTEmulator(object):
 
             # hm correlations only have one kind of <1,delta_i> correlation
             bterms_hm = [
+                0,
                 1,
                 0,
                 b1,
@@ -1004,9 +1008,9 @@ class LPTEmulator(object):
 
             # IDs for the <nabla^2, X> ~ -k^2 <1, X> approximation.
             if cross:
-                nabla_idx = [0, 2, 5, 9]
-            else:
                 nabla_idx = [1, 3, 6, 10]
+            else:
+                nabla_idx = [2, 4, 7, 11]
 
             # Higher derivative terms
             pkvec[self.nspec :] = -(k ** 2) * pkvec[nabla_idx]
@@ -1103,7 +1107,7 @@ class LPTEmulator(object):
                 lambda_surr = self._get_pcs(evec_spec, simoverlpt, self.npc)
                 lambda_surr_normed = None
                 lambda_var = np.zeros_like(lambda_surr)
-                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)                
+#                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)                
 
             # otherwise just use the surrogates to compute PCs
             else:
@@ -1140,7 +1144,7 @@ class LPTEmulator(object):
                 else:
                     lambda_surr = lambda_surr_normed
                 lambda_var = unnorm(lambda_var_normed, self.pcs_mean, self.pcs_mult**2)
-                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)
+#                simoverlpt_var = np.einsum("bkp, cbp->cbk", evecs**2, lambda_var)
                 
         simoverlpt_emu = np.einsum("bkp, cbp->cbk", evecs, lambda_surr)
 
@@ -1157,12 +1161,12 @@ class LPTEmulator(object):
             pk_emu[..., k > self.kmin] = (10 ** (simoverlpt_emu) * pk_emu)[
                 ..., k > self.kmin
             ]
-            var_emu[..., k > self.kmin] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[
-                ..., k > self.kmin
-            ]
+#            var_emu[..., k > self.kmin] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[
+#                ..., k > self.kmin
+#            ]
         else:
             pk_emu[...] = 10 ** (simoverlpt_emu) * pk_emu[...]
-            var_emu[...] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[...]
+#            var_emu[...] = (pk_emu**2 * spectra_lpt**2 * (np.log(10) * (simoverlpt_var))**2)[...]
 
         return pk_emu, lambda_surr, var_emu
 

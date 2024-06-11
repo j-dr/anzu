@@ -156,6 +156,10 @@ def advect_fields(configs, lag_field_dict=None, just_cbm=False):
     pkclass.set(configs["Cosmology"])
     pkclass.compute()
     z_ic = configs["z_ic"]
+    if 'z_this' in configs:
+        z_this = configs['z_this']
+    else:
+        z_this = None
     Dic = configs.get('Dic', None)
 
     kcut = configs.get('surrogate_gaussian_cutoff', None)
@@ -180,7 +184,8 @@ def advect_fields(configs, lag_field_dict=None, just_cbm=False):
         rsd=rsd,
         Dic=Dic,
         gaussian_cutoff=gaussian_cutoff,
-        kgaussian_cutoff=kcut
+        kgaussian_cutoff=kcut,
+        z_this=z_this
     )
 
     if rank == 0:
@@ -201,7 +206,8 @@ def advect_fields(configs, lag_field_dict=None, just_cbm=False):
             z_ic=z_ic,
             lbox=configs["lbox"],
             rsd=rsd,
-            Dic=Dic
+            Dic=Dic,
+            z_this=z_this
         )
         posvec_tot = np.vstack([posvec, posvec_nu])
         del posvec_nu
