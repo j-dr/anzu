@@ -12,6 +12,7 @@ from copy import copy
 import numpy as np
 import time, sys, gc, psutil, os, yaml
 import pmesh, h5py
+import fitsio
 
 try:
     from nbodykit.algorithms.fftpower import FFTPower
@@ -457,7 +458,7 @@ def advect_fields(configs, lag_field_dict=None):
 
     field_dict = dict(zip(labelvec, fieldlist))
 
-    return pm, field_dict, field_D, keynames, labelvec, zbox
+    return pm, field_dict, field_D, keynames, labelvec, zbox, layout
 
 
 def measure_basis_spectra(
@@ -596,7 +597,7 @@ def measure_basis_spectra(
 def advect_fields_and_measure_spectra(
     config, lag_field_dict=None, field_dict2=None, field_D2=None
 ):
-    pm, field_dict, field_D, keynames, labelvec, zbox = advect_fields(
+    pm, field_dict, field_D, keynames, labelvec, zbox, layout = advect_fields(
         config, lag_field_dict=lag_field_dict
     )
 
@@ -614,10 +615,45 @@ def advect_fields_and_measure_spectra(
     return field_dict, field_D, keynames, labelvec, zbox, pm
 
 
+def advect_fields_and_eval_at_pos(
+    config, lag_field_dict=None, field_dict2=None, field_D2=None
+):
+    
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    nranks = comm.Get_size()
+        
+    pm, field_dict, field_D, keynames, labelvec, zbox, layout = advect_fields(
+        config, lag_field_dict=lag_field_dict
+    )
+    
+    arr = np.load(config['galfile'], mmap_mode="r")
+    
+    gpos = arr[rank::nranks, 1:]
+    gid = arr[rank::nranks,0]
+    fvals = np.zeros((len(gpos),len(labelvec)))
+    #layout = pm.decompose(gpos)
+    #gpos = layout.exchange(gpos)
+    
+    for i in range(len(labelvec)):
+        fvals[:,i] = field_dict[labelvec[i]].readout(gpos, layout=layout)
+        
+    if rank==0:
+        fvals_all = comm.gather(fvals)
+        gid_all = comm.gather(gid)
+        fvals = np.vstack([gid_all, fvals_all])
+        
+        np.save(f'{config['galfile']}.lagfields_{config['nmesh_out']}.npy', fvals)
+        
+    return fvals
+
+
 if __name__ == "__main__":
     ################################### YAML /Initial Config stuff #################################
     yamldir = sys.argv[1]
     fieldnameadd = sys.argv[2]
 
     configs = yaml.load(open(yamldir, "r"), yaml.FullLoader)
-    measure_basis_spectra(configs)
+    
+    advect_fields_and_eval_at_pos(configs)
+    

@@ -85,6 +85,27 @@ def get_linear_field(ic_format, ic_path, nmesh, fft, cv=False):
     else:
         return delta_lin
 
+def filter_linear_density(
+    delta_lin, nmesh, Lbox, fft, gaussian_kcut, filt_ics_file
+):
+    d_filt = gaussian_filter(delta_lin, nmesh, Lbox, rank, size, fft, gaussian_kcut)
+    del delta_lin
+
+    # have to write out after each filter step, since mpi4py-fft will
+    # overwrite arrays otherwise
+
+    with h5py.File(filt_ics_file, "a", driver="mpio", comm=MPI.COMM_WORLD) as ics:
+        try:
+            dset_delta = ics.create_dataset(
+                "DM_delta_filt_{}".format(gaussian_kcut), (nmesh, nmesh, nmesh), dtype=d_filt.dtype
+            )
+        except Exception as e:
+            print(e)
+            dset_delta = ics["DM_delta_filt_{}".format(gaussian_kcut)]
+
+        dset_delta[rank * nmesh // size : (rank + 1) * nmesh // size, :, :] = d_filt[:]
+
+    return d_filt
 
 def filter_linear_fields(
     delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kcut, filt_ics_file
@@ -419,10 +440,15 @@ def make_lagfields(configs, save_to_disk=False, z=None):
             delta_lin, nmesh, Lbox, rank, size, fft, configs, z
         )
 
-    elif compute_cv_surrogate:
+    if compute_cv_surrogate:
         delta_lin = filter_linear_fields(
             delta_lin, p_x, p_y, p_z, nmesh, Lbox, fft, gaussian_kcut, filt_ics_file
-        )
+        )  
+    else:
+        delta_lin = filter_linear_density(
+            delta_lin, nmesh, Lbox, fft, gaussian_kcut, filt_ics_file
+        )        
+    
 
     d = newDistArray(fft, False)
     d[:] = delta_lin
