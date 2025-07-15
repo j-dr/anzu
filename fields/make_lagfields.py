@@ -432,17 +432,26 @@ def make_lagfields(configs, save_to_disk=False, z=None):
     # Compute the delta^2 field. This operation is local in real space.
     d2 = newDistArray(fft, False)
     d2[:] = delta_lin * delta_lin
-    dmean = MPI_mean(d2, nmesh)
+    dvar = MPI_mean(d2, nmesh)
 
     # Mean-subtract delta^2
-    d2 -= dmean
+    d2 -= dvar
     if (rank == 0) & verbose:
-        print(dmean, " mean deltasq")
+        print(dvar, " mean deltasq")
 
     # Parallel-write delta^2 to hdf5 file
     if save_to_disk:
         d2.write(outdir + "{}_{}.h5".format(basename, nmesh), "deltasq", step=2)
         d.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta", step=2)
+
+    d3 = newDistArray(fft, False)
+    d3[:] = delta_lin * delta_lin * delta_lin * (1 - dvar)
+    d3mean = MPI_mean(d3, nmesh)
+
+    d3 = d3 - d3mean
+
+    if save_to_disk:
+        d3.write(outdir + "{}_{}.h5".format(basename, nmesh), "delta3", step=2)
 
     u_hat = fft.forward(delta_lin, normalize=True)
     deltak = u_hat.copy()

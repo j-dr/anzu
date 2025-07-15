@@ -249,7 +249,7 @@ def advect_fields(configs, lag_field_dict=None, just_cbm=False):
         fieldlist = []
 
     if not just_cbm:
-        keynames.extend(["1cb", "delta", "deltasq", "tidesq", "nablasq"])
+        keynames.extend(["1cb", "delta", "deltasq", "tidesq", "nablasq", "delta3"])
         fieldlist.extend(
             [
                 pm.create(type="real"),
@@ -257,6 +257,7 @@ def advect_fields(configs, lag_field_dict=None, just_cbm=False):
                 pm.create(type="real"),
                 pm.create(type="real"),
                 pm.create(type="real"),
+                pm.create(type="real")
             ]
         )
     else:
@@ -462,8 +463,9 @@ def advect_fields(configs, lag_field_dict=None, just_cbm=False):
                 r"$\delta^2$",
                 r"$s^2$",
                 r"$\nabla^2\delta$",
+                r"$:\delta^3:$",
             ]
-            field_D = [1, 1, D, D**2, D**2, D]
+            field_D = [1, 1, D, D**2, D**2, D, D**3]
         else:
             labelvec = [
                 "1m",
@@ -472,11 +474,11 @@ def advect_fields(configs, lag_field_dict=None, just_cbm=False):
             field_D = [1, 1]
 
     else:
-        labelvec = ["1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$"]
-        field_D = [1, D, D**2, D**2, D]
+        labelvec = ["1cb", r"$\delta_L$", r"$\delta^2$", r"$s^2$", r"$\nabla^2\delta$", r"$:\delta^3:$"]
+        field_D = [1, D, D**2, D**2, D, D**3]
 
     if configs["scale_dependent_growth"]:
-        field_D = [1, 1, 1, 1, 1, 1]
+        field_D = [1, 1, 1, 1, 1, 1, 1]
 
     field_dict = dict(zip(labelvec, fieldlist))
 #    print(f'field_dict={field_dict}')
